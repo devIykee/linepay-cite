@@ -11,41 +11,11 @@ Everything runs out of the box in **simulate mode** (no keys), and flips to **re
 
 ---
 
-## Why this matters (hackathon fit)
+## Why this matters
 
 Writers earn almost nothing from readers — and *nothing* from the AI agents now consuming their work in tiny chunks. Subscriptions are too coarse to price a single essay, let alone a single paragraph. **Nanopayments on Arc** make the unit of sale as small as the unit of attention. LinePay Cite shows both sides of that future working in real time: a human or an AI agent paying a writer, per line, gas-free.
 
 **Heavy Circle/Arc usage:** Arc testnet (USDC settlement), Circle Gateway (gas-free batched nanopayments, $0.000001 floor), x402 (pay-per-request), Circle Agent Stack (buyer-agent wallet), and an on-chain Circle Contracts revenue split.
-
----
-
-## File tree
-
-```
-lepton-linepay-cite/
-├── apps/
-│   ├── web/                      # Next.js 15 (App Router) — UI + API + x402 paywall
-│   │   ├── app/
-│   │   │   ├── page.tsx           # landing
-│   │   │   ├── creators/page.tsx  # creator portal (upload, pricing, earnings, history)
-│   │   │   ├── demo/page.tsx      # reader/agent demo + live tx feed
-│   │   │   └── api/
-│   │   │       ├── content/[id]/  # ⭐ x402-protected per-line endpoint
-│   │   │       ├── content/       # upload content
-│   │   │       ├── creators/…     # register + earnings dashboard
-│   │   │       ├── catalog/       # discovery surface for the agent
-│   │   │       ├── feed/          # live nanopayment feed
-│   │   │       ├── policy/        # Guardian policy CRUD
-│   │   │       └── research/      # ⭐ triggers the buyer agent
-│   │   └── lib/                   # db (SQLite), store, payments
-│   └── agent/                    # Buyer agent (LangChain + x402 client)
-│       └── src/{agent,x402-client,cli}.ts
-├── packages/
-│   └── sdk/                      # @linepay/sdk — x402, Gateway, pricing, hashing, Guardian
-├── contracts/                    # RevenueSplit.sol (85/10/5) + Hardhat deploy
-├── scripts/{setup.sh,seed.mjs}
-└── README.md
-```
 
 ---
 
