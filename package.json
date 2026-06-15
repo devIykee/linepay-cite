@@ -1,0 +1,23 @@
+{
+  "name": "lepton-linepay-cite",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LinePay Cite — per-line nanopayments for writers, with an autonomous reading agent. Built on x402 + Circle Gateway + Arc.",
+  "workspaces": [
+    "packages/*",
+    "apps/*",
+    "contracts"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace apps/web",
+    "build": "npm run build --workspace apps/web",
+    "seed": "node scripts/seed.mjs",
+    "agent": "npm run agent --workspace apps/agent",
+    "setup": "bash scripts/setup.sh",
+    "contracts:compile": "npm run compile --workspace contracts",
+    "contracts:deploy": "npm run deploy --workspace contracts"
+  },
+  "engines": {
+    "node": ">=20.6.0"
+  }
+}
