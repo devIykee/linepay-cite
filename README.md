@@ -12,19 +12,6 @@ Runs **end-to-end out of the box in simulate mode** (no keys), and flips to **re
 
 ---
 
-## Why this matters
-
-## Why this wins (mapped to the judging rubric)
-
-| Weight | Criterion | How LinePay Cite scores |
-|---|---|---|
-| **30%** | **Agentic Sophistication** | The buyer agent (LangChain + Claude `claude-opus-4-8`) genuinely *decides*: it discovers sources, reads free previews, scores relevance, picks line ranges, and chooses **whether the micro-payment is worth it** — then a **Guardian** policy independently authorizes the spend. Every decision is logged and rendered as a visible chain-of-thought. |
-| **30%** | **Traction** | **Both sides of the market are real and live.** Humans pay per line on `/read`; the agent pays autonomously on `/demo`. A live stats bar shows real volume, payment count, and the human/agent split during the event window — exactly "creators earning and readers paying." |
-| **20%** | **Circle tool usage** | **x402** (per-request paywall), **Circle Gateway nanopayments** (gas-free batched settlement, $0.000001 floor), **USDC on Arc**, **Circle Contracts** (on-chain `RevenueSplit`), and **Circle Agent Stack** (agent wallet). Mirrors the `circlefin/arc-nanopayments` reference end to end. |
-| **20%** | **Innovation** | **Pay-per-citation**: when an agent grounds an answer in a line range, the citation *is* the payment, with a tx-hash receipt as provenance (RFB 6 Prior Art #1). Per-line granularity turns "what should this cost?" into a decision made thousands of times an hour. |
-
----
-
 ## Quick start (one command)
 
 > Requires Node ≥ 20.6.
