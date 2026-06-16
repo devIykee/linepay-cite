@@ -46,46 +46,6 @@ npm run demo:traffic # optional — populate traction
 
 ---
 
-## How a payment flows (x402 + Circle Gateway on Arc)
-
-```
-Reader/Agent ──GET /api/content/c1?lineStart=4&lineEnd=44──▶ Server
-Reader/Agent ◀──────── 402 Payment Required + x402 quote ──── Server   (asset, amount, payTo, nonce)
-   │  Guardian.checkPolicy(quote, spentSoFar)  → APPROVED/BLOCKED  (budget, max $/line, verified)
-   │  GatewayClient.createPayment(...)         → signed authorization (gas-free, EIP-712)
-Reader/Agent ──GET … + X-PAYMENT: <base64 auth>──────────▶ Server
-                                  GatewayClient.settle() → USDC on Arc, batched
-                                  splitRevenue() 85/10/5  → recorded
-Reader/Agent ◀── 200 + text + X-PAYMENT-RESPONSE (tx receipt) ── Server
-```
-
-The first 3 lines are always free — a human reader judges the piece, and the agent judges relevance, before paying.
-
----
-
-## The autonomous buyer agent (RFB 1)
-
-`apps/agent` — pipeline, every step logged and shown live:
-
-1. **Discover** `/api/catalog` → 2. **Preview** free lines → 3. **Evaluate** relevance + worth-paying (LLM-driven; see below) → 4. **Guardian** hard-enforces budget / max-price-per-line / verified preference → 5. **Pay** via x402 + Gateway on Arc → 6. **Extract & cite** (tx hash as provenance) → 7. **Synthesize** a cited answer or continued-reading prose.
-
-**Pick your model (all optional, free-first).** The agent reasons through LangChain.js and auto-selects a provider:
-- **Groq (free + fast)** — set `GROQ_API_KEY` ([console.groq.com/keys](https://console.groq.com/keys)); default model `llama-3.3-70b-versatile`.
-- **Anthropic (Claude)** — set `ANTHROPIC_API_KEY`.
-- **No key** — a deterministic heuristic brain, so the demo always runs offline.
-
-Force a provider with `AGENT_PROVIDER=groq|anthropic`. The model used is shown in the agent's reasoning header and CLI output.
-
-The agent wallet is a **Circle Agent Stack** wallet; in simulate mode it needs no signature.
-
-## Guardian Lite (`GET/PUT /api/policy`)
-
-```json
-{ "budgetBaseUnits": "5000", "maxPricePerLine": "200", "maxPerPurchase": "2000", "requireVerified": false }
-```
-
----
-
 ## Going live on Arc testnet (Canteen + Circle tooling)
 
 One command installs the CLIs and prints the wallet/faucet steps:
@@ -148,32 +108,6 @@ The `…:marketplace` / `…:mock-usdc` scripts target `--network arcTestnet`; a
 
 **Routes:** `/` · `/read` (library) · `/content/[id]` (per-item reader — prose for articles, **locked code-block** for agent-skills/prompts) · `/market` (on-chain) · `/creators` · `/demo` · **`/docs`** (creator + agent-integration guide).
 
-## Submission checklist (Lepton Agents Hackathon)
-
-- [x] **Public GitHub repo** — this repo.
-- [x] **Working product** — runs locally in one command; deploy to Vercel for a live link (frontend + API routes; set `PAYMENTS_MODE`, `APP_BASE_URL`, and `ANTHROPIC_API_KEY` as env vars).
-- [x] **Both sides real** — human readers paying (`/read`) + autonomous agent paying (`/demo`), with a live traction stat bar.
-- [x] **Circle stack** — x402, Gateway nanopayments, USDC on Arc, Contracts, Agent Stack.
-- [ ] **< 3-min video demo** — script below.
-- [ ] **Submit** at `forms.gle/SMqLaw2pMGDe58LFA` with GitHub link + video (+ live URL).
-
-### Traction question answers (for the form)
-- **Users onboarded:** seeded 4 creators + content; the demo-traffic generator + the live `/read` and `/demo` flows produce real human and agent payments during the event window (see the home stats bar for live totals).
-- **User problem:** writers and publishers earn ~nothing from readers consuming work in tiny chunks, and *nothing* from the AI agents now reading their work as free substrate. Per-line nanopayments + pay-per-citation fix both.
-
----
-
-## 3-minute demo video script
-
-1. **0:00 — Hook (20s).** "Writers earn nothing when AI reads their work, and subscriptions are too coarse to sell one article. We made a single *line* sellable — on Arc." Show the home page + live stats bar ticking.
-2. **0:20 — Human reader (40s).** Open `/read`, pick an article, read the free preview, hit the paywall, click **Pay & read 10 lines** — show the teal "Paid $0.000X to @creator · settled on Arc · tx…" confirmation. Unlock another chunk.
-3. **1:00 — Autonomous agent (70s).** Open `/demo`, type *"How do nanopayments change online writing?"*, **Run Agent**. Narrate the chain-of-thought: discover → preview → **evaluate** → **Guardian APPROVED** → **pay via Circle Gateway on Arc** → cite. Show the tx hash and paid-sources list.
-4. **2:10 — Money lands (30s).** Switch to `/creators`, pick `@ada_writes`, show earnings + transaction history. Back on `/demo`, point at the live feed tagging 👤 human vs 🤖 agent payments.
-5. **2:40 — Continue-reading (15s).** Run *"continue reading The Clockwork Archive"* — the agent buys the next chapter's lines and stitches the prose.
-6. **2:55 — Close (5s).** "x402 · Circle Gateway · USDC on Arc. Make the smallest unit sellable."
-
----
-
 ## API reference (selected)
 
 | Method | Route | Purpose |
@@ -191,5 +125,3 @@ The `…:marketplace` / `…:mock-usdc` scripts target `--network arcTestnet`; a
 Next.js 15 · TypeScript · LangChain.js (Groq / Claude / heuristic) · RainbowKit + Wagmi/Viem · better-sqlite3 · Solidity (Hardhat, OpenZeppelin) · Tailwind (editorial design system) · **Circle Gateway (`@circle-fin/x402-batching`) · x402 (`/v1/x402/settle`, EIP-3009) · USDC on Arc · Circle Agent Stack + Circle CLI**.
 
 ---
-
-Built for the Lepton Agents Hackathon (Canteen × Circle × Arc). Simulate mode is for the judges' convenience; the on-chain path is real Arc testnet USDC via Circle Gateway.
