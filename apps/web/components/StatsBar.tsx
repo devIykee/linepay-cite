@@ -17,10 +17,22 @@ export default function StatsBar() {
   const [s, setS] = useState<Stats | null>(null);
 
   useEffect(() => {
-    const load = () => fetch("/api/stats").then((r) => r.json()).then(setS).catch(() => {});
+    let stopped = false;
+    const load = () => {
+      // Don't poll a hidden tab — saves the DB from a constant query stream.
+      if (document.visibilityState === "hidden") return;
+      fetch("/api/stats").then((r) => r.json()).then((d) => !stopped && setS(d)).catch(() => {});
+    };
     load();
-    const id = setInterval(load, 4000);
-    return () => clearInterval(id);
+    // 20s is plenty for a traction ticker; 4s saturated the connection pool.
+    const id = setInterval(load, 20000);
+    const onVis = () => document.visibilityState === "visible" && load();
+    document.addEventListener("visibilitychange", onVis);
+    return () => {
+      stopped = true;
+      clearInterval(id);
+      document.removeEventListener("visibilitychange", onVis);
+    };
   }, []);
 
   if (!s || s.payments === 0) return null;

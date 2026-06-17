@@ -1,201 +1,827 @@
-import { randomUUID } from "node:crypto";
-import { db } from "./db.js";
-import type { SettlementReceipt, RevenueSplit } from "@linepay/sdk";
+/**
+ * Postgres data-access layer. All SQL lives here; routes call typed functions.
+ * Replaces the legacy SQLite line-based store. Amounts are decimal USDC strings.
+ */
+import { query, queryOne, tx } from "./db.js";
+import type {
+  AdminEvent,
+  AdminEventType,
+  AgentSession,
+  Chunk,
+  Content,
+  ContentStatus,
+  ContentType,
+  ExportJob,
+  LedgerRow,
+  LedgerRowEnriched,
+  LedgerStatus,
+  PayerKind,
+  Payout,
+  User,
+  UserRole,
+} from "./types.js";
 
-export interface Creator {
-  id: string;
-  handle: string;
-  display_name: string;
-  wallet: string;
-  verified: number;
-  created_at: number;
+// ─────────────────────────────────────────────────────────────────────────────
+// Users (creators / admins)
+// ─────────────────────────────────────────────────────────────────────────────
+
+function slugify(raw: string): string {
+  return raw
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 24) || "creator";
 }
 
-export type ContentKind =
-  | "article"
-  | "novel_chapter"
-  | "agent-skill"
-  | "prompt-template"
-  | "knowledge-base";
+/** Short random hex suffix to keep generated handles unique. */
+function randomSuffix(): string {
+  // Deterministic-enough uniqueness without Math.random (avoids sandbox bans):
+  // derive from high-res time. Collisions are caught by the unique index.
+  return process.hrtime.bigint().toString(36).slice(-4);
+}
 
-export interface Content {
+export interface OAuthProfile {
+  email: string;
+  name?: string | null;
+  avatar?: string | null;
+  provider?: string | null;
+}
+
+/**
+ * Create-or-update a user from an OAuth login. Promotes to 'admin' when the
+ * email matches ADMIN_EMAIL (and never downgrades an existing admin). Generates
+ * a unique handle on first insert; keeps it stable afterwards.
+ * Returns { user, isNew } so the caller can fire the SIGNUP admin event.
+ */
+export async function upsertUserFromOAuth(
+  profile: OAuthProfile
+): Promise<{ user: User; isNew: boolean }> {
+  const email = profile.email.trim().toLowerCase();
+  const isAdmin = !!process.env.ADMIN_EMAIL && email === process.env.ADMIN_EMAIL.trim().toLowerCase();
+  const base = slugify(email.split("@")[0] ?? profile.name ?? "creator");
+  const candidateHandle = `${base}_${randomSuffix()}`;
+  const displayName = profile.name ?? base;
+
+  const row = await queryOne<User & { xmax: string }>(
+    `INSERT INTO users (email, name, avatar, provider, role, handle, display_name, last_active_at)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+     ON CONFLICT (email) DO UPDATE SET
+       name = EXCLUDED.name,
+       avatar = EXCLUDED.avatar,
+       provider = EXCLUDED.provider,
+       display_name = COALESCE(users.display_name, EXCLUDED.display_name),
+       last_active_at = NOW(),
+       role = CASE WHEN $8 OR users.role = 'admin' THEN 'admin' ELSE users.role END
+     RETURNING *, (xmax = 0) AS xmax`,
+    [
+      email,
+      profile.name ?? null,
+      profile.avatar ?? null,
+      profile.provider ?? null,
+      isAdmin ? "admin" : "creator",
+      candidateHandle,
+      displayName,
+      isAdmin,
+    ]
+  );
+  if (!row) throw new Error("user upsert failed");
+  // xmax = 0 on a freshly inserted row (Postgres trick to detect insert vs update).
+  const isNew = String((row as unknown as { xmax: boolean }).xmax) === "true";
+  const { xmax: _ignore, ...user } = row as User & { xmax: unknown };
+  return { user: user as User, isNew };
+}
+
+export function getUserById(id: string): Promise<User | undefined> {
+  return queryOne<User>(`SELECT * FROM users WHERE id = $1`, [id]);
+}
+export function getUserByEmail(email: string): Promise<User | undefined> {
+  return queryOne<User>(`SELECT * FROM users WHERE email = $1`, [email.toLowerCase()]);
+}
+export function getUserByHandle(handle: string): Promise<User | undefined> {
+  return queryOne<User>(`SELECT * FROM users WHERE handle = $1`, [handle]);
+}
+
+export function touchUser(id: string): Promise<unknown> {
+  return query(`UPDATE users SET last_active_at = NOW() WHERE id = $1`, [id]);
+}
+
+/** Store a validated (EIP-55) wallet address. Caller must validate first. */
+export function setUserWallet(id: string, wallet: string): Promise<User | undefined> {
+  return queryOne<User>(
+    `UPDATE users SET wallet_address = $2 WHERE id = $1 RETURNING *`,
+    [id, wallet]
+  );
+}
+
+export function setUserRole(id: string, role: UserRole): Promise<User | undefined> {
+  return queryOne<User>(`UPDATE users SET role = $2 WHERE id = $1 RETURNING *`, [id, role]);
+}
+
+export function setUserSuspended(id: string, suspended: boolean): Promise<User | undefined> {
+  return queryOne<User>(
+    `UPDATE users SET suspended = $2 WHERE id = $1 RETURNING *`,
+    [id, suspended]
+  );
+}
+
+export interface UserListFilters {
+  search?: string;
+  role?: UserRole;
+  walletLinked?: boolean;
+  sort?: "joined" | "earned" | "content";
+  limit?: number;
+  offset?: number;
+}
+
+export interface UserListRow extends User {
+  content_count: number;
+  total_earned: string;
+}
+
+export async function listUsers(f: UserListFilters = {}): Promise<{ rows: UserListRow[]; total: number }> {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  if (f.search) {
+    params.push(`%${f.search.toLowerCase()}%`);
+    where.push(`(LOWER(u.name) LIKE $${params.length} OR LOWER(u.email) LIKE $${params.length} OR LOWER(u.handle) LIKE $${params.length})`);
+  }
+  if (f.role) {
+    params.push(f.role);
+    where.push(`u.role = $${params.length}`);
+  }
+  if (f.walletLinked !== undefined) {
+    where.push(f.walletLinked ? `u.wallet_address IS NOT NULL` : `u.wallet_address IS NULL`);
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  const order =
+    f.sort === "earned"
+      ? `total_earned DESC`
+      : f.sort === "content"
+        ? `content_count DESC`
+        : `u.created_at DESC`;
+
+  const limit = Math.min(f.limit ?? 25, 100);
+  const offset = f.offset ?? 0;
+  params.push(limit, offset);
+
+  const rows = await query<UserListRow>(
+    `SELECT u.*,
+        (SELECT COUNT(*) FROM content c WHERE c.creator_id = u.id)::int AS content_count,
+        COALESCE((SELECT SUM(creator_amount) FROM payment_ledger l WHERE l.creator_id = u.id AND l.status='completed'), 0)::text AS total_earned
+     FROM users u
+     ${whereSql}
+     ORDER BY ${order}
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
+  );
+  const totalRow = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM users u ${whereSql}`,
+    params.slice(0, params.length - 2)
+  );
+  return { rows, total: Number(totalRow?.count ?? 0) };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Content + chunks
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface CreateContentInput {
+  creatorId: string;
+  slug: string;
+  title: string;
+  summary?: string;
+  tags?: string;
+  contentType: ContentType;
+  body: string;
+  pricePerBlock: string; // decimal USDC
+  gatewayAddress?: string | null;
+  /** Chunks to store, in order. */
+  chunks: Array<{ text: string; isFree: boolean }>;
+  /** block_index of the first chunk. Articles use 0 (chunk 0 is the free
+   * preview); agent-skills use 1 (block 0 is the generated onboarding). */
+  firstBlockIndex?: number;
+  status?: ContentStatus;
+}
+
+/** Create content + its chunks atomically. */
+export async function createContent(input: CreateContentInput): Promise<Content> {
+  return tx(async (client) => {
+    const res = await client.query<Content>(
+      `INSERT INTO content
+         (creator_id, slug, title, summary, tags, content_type, body, price_per_block,
+          gateway_address, status, block_count, published_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+       RETURNING *`,
+      [
+        input.creatorId,
+        input.slug,
+        input.title,
+        input.summary ?? "",
+        input.tags ?? "",
+        input.contentType,
+        input.body,
+        input.pricePerBlock,
+        input.gatewayAddress ?? null,
+        input.status ?? "draft",
+        input.chunks.filter((c) => !c.isFree).length,
+        input.status === "published" ? new Date() : null,
+      ]
+    );
+    const content = res.rows[0];
+    const base = input.firstBlockIndex ?? 0;
+    for (let i = 0; i < input.chunks.length; i++) {
+      const c = input.chunks[i];
+      await client.query(
+        `INSERT INTO chunks (content_id, block_index, text, is_free) VALUES ($1,$2,$3,$4)`,
+        [content.id, base + i, c.text, c.isFree]
+      );
+    }
+    return content;
+  });
+}
+
+export function getContentBySlug(slug: string): Promise<Content | undefined> {
+  return queryOne<Content>(`SELECT * FROM content WHERE slug = $1`, [slug]);
+}
+export function getContentById(id: string): Promise<Content | undefined> {
+  return queryOne<Content>(`SELECT * FROM content WHERE id = $1`, [id]);
+}
+
+export function getChunks(contentId: string): Promise<Chunk[]> {
+  return query<Chunk>(
+    `SELECT * FROM chunks WHERE content_id = $1 ORDER BY block_index ASC`,
+    [contentId]
+  );
+}
+export function getChunk(contentId: string, blockIndex: number): Promise<Chunk | undefined> {
+  return queryOne<Chunk>(
+    `SELECT * FROM chunks WHERE content_id = $1 AND block_index = $2`,
+    [contentId, blockIndex]
+  );
+}
+
+export interface ContentWithCreator extends Content {
+  creator_handle: string | null;
+  creator_name: string | null;
+  creator_avatar: string | null;
+  creator_verified: boolean;
+}
+
+export function getContentWithCreator(slug: string): Promise<ContentWithCreator | undefined> {
+  return queryOne<ContentWithCreator>(
+    `SELECT c.*, u.handle AS creator_handle, u.display_name AS creator_name,
+            u.avatar AS creator_avatar, u.verified AS creator_verified
+     FROM content c JOIN users u ON u.id = c.creator_id
+     WHERE c.slug = $1`,
+    [slug]
+  );
+}
+
+export function listContentByCreator(creatorId: string): Promise<Content[]> {
+  return query<Content>(
+    `SELECT * FROM content WHERE creator_id = $1 ORDER BY created_at DESC`,
+    [creatorId]
+  );
+}
+
+export interface MarketplaceFilters {
+  contentType?: ContentType;
+  minPrice?: string;
+  maxPrice?: string;
+  sort?: "newest" | "popular";
+  limit?: number;
+  offset?: number;
+}
+
+export function listPublished(f: MarketplaceFilters = {}): Promise<ContentWithCreator[]> {
+  const where: string[] = [`c.status = 'published'`];
+  const params: unknown[] = [];
+  if (f.contentType) {
+    params.push(f.contentType);
+    where.push(`c.content_type = $${params.length}`);
+  }
+  if (f.minPrice) {
+    params.push(f.minPrice);
+    where.push(`c.price_per_block >= $${params.length}`);
+  }
+  if (f.maxPrice) {
+    params.push(f.maxPrice);
+    where.push(`c.price_per_block <= $${params.length}`);
+  }
+  const order = f.sort === "popular" ? `c.view_count DESC` : `c.published_at DESC NULLS LAST`;
+  params.push(Math.min(f.limit ?? 30, 100), f.offset ?? 0);
+  return query<ContentWithCreator>(
+    `SELECT c.*, u.handle AS creator_handle, u.display_name AS creator_name,
+            u.avatar AS creator_avatar, u.verified AS creator_verified
+     FROM content c JOIN users u ON u.id = c.creator_id
+     WHERE ${where.join(" AND ")}
+     ORDER BY ${order}
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
+  );
+}
+
+export interface SearchResult {
   id: string;
-  creator_id: string;
-  kind: ContentKind;
+  slug: string;
   title: string;
   summary: string;
-  tags: string;
-  body: string;
-  line_count: number;
-  price_per_line: string;
-  free_lines: number;
-  series: string | null;
-  chapter_no: number | null;
-  created_at: number;
+  content_type: ContentType;
+  price_per_block: string;
+  creator_handle: string | null;
+  creator_name: string | null;
+  rank: number;
+  excerpt: string;
 }
 
-export interface Payment {
-  id: string;
-  content_id: string;
-  creator_id: string;
-  payer: string;
-  payer_kind: "agent" | "human";
-  line_start: number;
-  line_end: number;
-  line_count: number;
-  amount: string;
-  creator_amount: string;
-  platform_amount: string;
-  referrer_amount: string;
-  tx_hash: string;
-  batch_id: string | null;
-  content_hash: string;
-  simulated: number;
-  created_at: number;
+/** Ranked full-text search over published content. Uses websearch syntax. */
+export function searchContent(q: string, limit = 30, offset = 0): Promise<SearchResult[]> {
+  return query<SearchResult>(
+    `SELECT c.id, c.slug, c.title, c.summary, c.content_type, c.price_per_block,
+            u.handle AS creator_handle, u.display_name AS creator_name,
+            ts_rank(c.search_tsv, websearch_to_tsquery('english', $1)) AS rank,
+            ts_headline('english', COALESCE(NULLIF(c.summary,''), c.title),
+              websearch_to_tsquery('english', $1),
+              'StartSel=<mark>, StopSel=</mark>, MaxFragments=2, MaxWords=24, MinWords=6') AS excerpt
+     FROM content c JOIN users u ON u.id = c.creator_id
+     WHERE c.status = 'published' AND c.search_tsv @@ websearch_to_tsquery('english', $1)
+     ORDER BY rank DESC
+     LIMIT $2 OFFSET $3`,
+    [q, Math.min(limit, 100), offset]
+  );
 }
 
-// ── Creators ────────────────────────────────────────────────────────────────
-export function upsertCreator(c: Omit<Creator, "created_at"> & { created_at?: number }): Creator {
-  const created_at = c.created_at ?? Date.now();
-  db()
-    .prepare(
-      `INSERT INTO creators (id, handle, display_name, wallet, verified, created_at)
-       VALUES (@id, @handle, @display_name, @wallet, @verified, @created_at)
-       ON CONFLICT(handle) DO UPDATE SET
-         display_name=excluded.display_name, wallet=excluded.wallet, verified=excluded.verified`
-    )
-    .run({ ...c, created_at });
-  return getCreatorByHandle(c.handle)!;
+export function publishContent(id: string): Promise<Content | undefined> {
+  return queryOne<Content>(
+    `UPDATE content SET status='published', published_at=COALESCE(published_at, NOW()), updated_at=NOW()
+     WHERE id=$1 RETURNING *`,
+    [id]
+  );
+}
+export function unpublishContent(id: string): Promise<Content | undefined> {
+  return queryOne<Content>(
+    `UPDATE content SET status='draft', updated_at=NOW() WHERE id=$1 RETURNING *`,
+    [id]
+  );
+}
+export function suspendContent(id: string, reason: string): Promise<Content | undefined> {
+  return queryOne<Content>(
+    `UPDATE content SET status='suspended', suspended_reason=$2, updated_at=NOW() WHERE id=$1 RETURNING *`,
+    [id, reason]
+  );
+}
+export function reinstateContent(id: string): Promise<Content | undefined> {
+  return queryOne<Content>(
+    `UPDATE content SET status='published', suspended_reason=NULL, updated_at=NOW() WHERE id=$1 RETURNING *`,
+    [id]
+  );
+}
+export function deleteContent(id: string): Promise<unknown> {
+  return query(`DELETE FROM content WHERE id=$1`, [id]);
 }
 
-export function getCreatorByHandle(handle: string): Creator | undefined {
-  return db().prepare(`SELECT * FROM creators WHERE handle = ?`).get(handle) as Creator | undefined;
+/** Update content fields and optionally replace its chunks (re-chunk on edit). */
+export async function updateContent(
+  id: string,
+  fields: { title?: string; summary?: string; tags?: string; pricePerBlock?: string; body?: string; status?: ContentStatus },
+  rechunk?: { chunks: Array<{ text: string; isFree: boolean }>; firstBlockIndex: number }
+): Promise<Content | undefined> {
+  return tx(async (client) => {
+    if (rechunk) {
+      await client.query(`DELETE FROM chunks WHERE content_id = $1`, [id]);
+      const base = rechunk.firstBlockIndex;
+      for (let i = 0; i < rechunk.chunks.length; i++) {
+        await client.query(`INSERT INTO chunks (content_id, block_index, text, is_free) VALUES ($1,$2,$3,$4)`, [
+          id,
+          base + i,
+          rechunk.chunks[i].text,
+          rechunk.chunks[i].isFree,
+        ]);
+      }
+    }
+    const blockCount = rechunk ? rechunk.chunks.filter((c) => !c.isFree).length : null;
+    const res = await client.query<Content>(
+      `UPDATE content SET
+         title = COALESCE($2, title),
+         summary = COALESCE($3, summary),
+         tags = COALESCE($4, tags),
+         price_per_block = COALESCE($5, price_per_block),
+         body = COALESCE($6, body),
+         status = COALESCE($7, status),
+         block_count = COALESCE($8, block_count),
+         published_at = CASE WHEN $7 = 'published' THEN COALESCE(published_at, NOW()) ELSE published_at END,
+         updated_at = NOW()
+       WHERE id = $1 RETURNING *`,
+      [
+        id,
+        fields.title ?? null,
+        fields.summary ?? null,
+        fields.tags ?? null,
+        fields.pricePerBlock ?? null,
+        fields.body ?? null,
+        fields.status ?? null,
+        blockCount,
+      ]
+    );
+    return res.rows[0];
+  });
 }
-export function getCreator(id: string): Creator | undefined {
-  return db().prepare(`SELECT * FROM creators WHERE id = ?`).get(id) as Creator | undefined;
-}
-export function listCreators(): Creator[] {
-  return db().prepare(`SELECT * FROM creators ORDER BY created_at`).all() as Creator[];
+export function incrementView(id: string): Promise<unknown> {
+  return query(`UPDATE content SET view_count = view_count + 1 WHERE id=$1`, [id]);
 }
 
-// ── Content ─────────────────────────────────────────────────────────────────
-export function createContent(c: Omit<Content, "id" | "created_at"> & { id?: string }): Content {
-  const id = c.id ?? `c_${randomUUID().slice(0, 8)}`;
-  const created_at = Date.now();
-  db()
-    .prepare(
-      `INSERT OR REPLACE INTO content
-        (id, creator_id, kind, title, summary, tags, body, line_count, price_per_line, free_lines, series, chapter_no, created_at)
-       VALUES (@id,@creator_id,@kind,@title,@summary,@tags,@body,@line_count,@price_per_line,@free_lines,@series,@chapter_no,@created_at)`
-    )
-    .run({ ...c, id, created_at });
-  return getContent(id)!;
+/** True if a creator has any published content (for the first-publish email). */
+export async function creatorPublishedCount(creatorId: string): Promise<number> {
+  const r = await queryOne<{ count: string }>(
+    `SELECT COUNT(*)::text AS count FROM content WHERE creator_id=$1 AND status='published'`,
+    [creatorId]
+  );
+  return Number(r?.count ?? 0);
 }
 
-export function getContent(id: string): Content | undefined {
-  return db().prepare(`SELECT * FROM content WHERE id = ?`).get(id) as Content | undefined;
+// ─────────────────────────────────────────────────────────────────────────────
+// Payment ledger
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface InsertLedgerInput {
+  contentId: string;
+  creatorId: string;
+  payerId: string;
+  payerKind: PayerKind;
+  blockIndex: number;
+  grossAmount: string;
+  creatorAmount: string;
+  platformAmount: string;
+  referrerAmount: string;
+  referrerId?: string | null;
+  paymentToken?: string | null;
+  txHash?: string | null;
+  status: LedgerStatus;
 }
 
-export function listContent(): Content[] {
-  return db().prepare(`SELECT * FROM content ORDER BY created_at DESC`).all() as Content[];
+/**
+ * Insert a ledger row. Idempotent on payment_token: if a row with the same
+ * token already exists, the existing row is returned (ON CONFLICT DO NOTHING).
+ */
+export async function insertLedger(input: InsertLedgerInput): Promise<LedgerRow> {
+  const completedAt = input.status === "completed" ? new Date() : null;
+  const inserted = await queryOne<LedgerRow>(
+    `INSERT INTO payment_ledger
+       (content_id, creator_id, payer_id, payer_kind, block_index, gross_amount,
+        creator_amount, platform_amount, referrer_amount, referrer_id, payment_token,
+        tx_hash, status, completed_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
+     ON CONFLICT (payment_token) WHERE payment_token IS NOT NULL DO NOTHING
+     RETURNING *`,
+    [
+      input.contentId,
+      input.creatorId,
+      input.payerId,
+      input.payerKind,
+      input.blockIndex,
+      input.grossAmount,
+      input.creatorAmount,
+      input.platformAmount,
+      input.referrerAmount,
+      input.referrerId ?? null,
+      input.paymentToken ?? null,
+      input.txHash ?? null,
+      input.status,
+      completedAt,
+    ]
+  );
+  if (inserted) return inserted;
+  // Conflict → return the existing row for this token.
+  const existing = await queryOne<LedgerRow>(
+    `SELECT * FROM payment_ledger WHERE payment_token = $1`,
+    [input.paymentToken]
+  );
+  if (!existing) throw new Error("ledger insert conflict but no existing row");
+  return existing;
 }
 
-/** Lightweight catalog the discovery tool searches over (no body). */
-export function catalog(): Array<
-  Pick<Content, "id" | "kind" | "title" | "summary" | "tags" | "line_count" | "price_per_line" | "series" | "chapter_no"> & {
-    creator_handle: string;
-    verified: boolean;
-  }
-> {
-  const rows = db()
-    .prepare(
-      `SELECT ct.id, ct.kind, ct.title, ct.summary, ct.tags, ct.line_count, ct.price_per_line,
-              ct.series, ct.chapter_no, cr.handle as creator_handle, cr.verified as verified
-       FROM content ct JOIN creators cr ON cr.id = ct.creator_id
-       ORDER BY ct.created_at DESC`
-    )
-    .all() as any[];
-  return rows.map((r) => ({ ...r, verified: !!r.verified }));
+export function getLedgerByToken(token: string): Promise<LedgerRow | undefined> {
+  return queryOne<LedgerRow>(`SELECT * FROM payment_ledger WHERE payment_token = $1`, [token]);
 }
 
-// ── Payments / earnings ───────────────────────────────────────────────────────
-export function recordPayment(args: {
-  content: Content;
-  payer: string;
-  payerKind: "agent" | "human";
-  lineStart: number;
-  lineEnd: number;
-  lineCount: number;
-  split: RevenueSplit;
-  receipt: SettlementReceipt;
-  contentHash: string;
-}): Payment {
-  const id = `p_${randomUUID().slice(0, 8)}`;
-  const total =
-    BigInt(args.split.creator.amount) +
-    BigInt(args.split.platform.amount) +
-    BigInt(args.split.referrer.amount);
-  const row: Payment = {
-    id,
-    content_id: args.content.id,
-    creator_id: args.content.creator_id,
-    payer: args.payer,
-    payer_kind: args.payerKind,
-    line_start: args.lineStart,
-    line_end: args.lineEnd,
-    line_count: args.lineCount,
-    amount: total.toString(),
-    creator_amount: args.split.creator.amount,
-    platform_amount: args.split.platform.amount,
-    referrer_amount: args.split.referrer.amount,
-    tx_hash: args.receipt.txHash,
-    batch_id: args.receipt.batchId ?? null,
-    content_hash: args.contentHash,
-    simulated: args.receipt.simulated ? 1 : 0,
-    created_at: Date.now(),
+export function finalizeLedgerByToken(
+  token: string,
+  txHash?: string | null
+): Promise<LedgerRow | undefined> {
+  return queryOne<LedgerRow>(
+    `UPDATE payment_ledger
+       SET status='completed', completed_at=NOW(), tx_hash=COALESCE($2, tx_hash)
+     WHERE payment_token=$1 AND status<>'completed'
+     RETURNING *`,
+    [token, txHash ?? null]
+  );
+}
+
+export function failLedgerByToken(token: string): Promise<LedgerRow | undefined> {
+  return queryOne<LedgerRow>(
+    `UPDATE payment_ledger SET status='failed' WHERE payment_token=$1 AND status='pending' RETURNING *`,
+    [token]
+  );
+}
+
+/** Earnings rollup for a creator (completed rows only). */
+export async function creatorEarnings(creatorId: string): Promise<{
+  totalEarned: string;
+  pendingPayout: string;
+  unlocks: number;
+  todayEarned: string;
+}> {
+  const r = await queryOne<{
+    total_earned: string;
+    today_earned: string;
+    unlocks: string;
+  }>(
+    `SELECT
+       COALESCE(SUM(creator_amount) FILTER (WHERE status='completed'), 0)::text AS total_earned,
+       COALESCE(SUM(creator_amount) FILTER (WHERE status='completed' AND created_at >= date_trunc('day', NOW())), 0)::text AS today_earned,
+       COUNT(*) FILTER (WHERE status='completed')::text AS unlocks
+     FROM payment_ledger WHERE creator_id = $1`,
+    [creatorId]
+  );
+  const paid = await queryOne<{ paid: string }>(
+    `SELECT COALESCE(SUM(amount),0)::text AS paid FROM payouts WHERE creator_id=$1 AND status<>'failed'`,
+    [creatorId]
+  );
+  const totalEarned = r?.total_earned ?? "0";
+  const pendingBase = BigInt(Math.round(Number(totalEarned) * 1e6)) - BigInt(Math.round(Number(paid?.paid ?? "0") * 1e6));
+  const pendingPayout = (Number(pendingBase) / 1e6).toFixed(6);
+  return {
+    totalEarned,
+    pendingPayout,
+    unlocks: Number(r?.unlocks ?? 0),
+    todayEarned: r?.today_earned ?? "0",
   };
-  db()
-    .prepare(
-      `INSERT INTO payments
-        (id,content_id,creator_id,payer,payer_kind,line_start,line_end,line_count,amount,
-         creator_amount,platform_amount,referrer_amount,tx_hash,batch_id,content_hash,simulated,created_at)
-       VALUES (@id,@content_id,@creator_id,@payer,@payer_kind,@line_start,@line_end,@line_count,@amount,
-         @creator_amount,@platform_amount,@referrer_amount,@tx_hash,@batch_id,@content_hash,@simulated,@created_at)`
-    )
-    .run(row);
-  return row;
 }
 
-/** Idempotency guard — has this on-chain tx already unlocked something? */
-export function paymentExistsByTx(txHash: string): boolean {
-  const row = db().prepare(`SELECT 1 FROM payments WHERE tx_hash = ? LIMIT 1`).get(txHash);
-  return !!row;
+export interface LedgerFilters {
+  contentId?: string;
+  creatorId?: string;
+  payerKind?: PayerKind;
+  status?: LedgerStatus;
+  search?: string; // tx hash or payer/address
+  from?: string;
+  to?: string;
+  limit?: number;
+  offset?: number;
 }
 
-export function recentPayments(limit = 50): Array<Payment & { title: string; creator_handle: string }> {
-  return db()
-    .prepare(
-      `SELECT p.*, ct.title as title, cr.handle as creator_handle
-       FROM payments p JOIN content ct ON ct.id = p.content_id JOIN creators cr ON cr.id = p.creator_id
-       ORDER BY p.created_at DESC LIMIT ?`
-    )
-    .all(limit) as any[];
+export function listLedger(f: LedgerFilters = {}): Promise<LedgerRowEnriched[]> {
+  const where: string[] = [];
+  const params: unknown[] = [];
+  const add = (clause: string, val: unknown) => {
+    params.push(val);
+    where.push(clause.replace("$?", `$${params.length}`));
+  };
+  // Columns are qualified with `l.` since the query joins content + users.
+  if (f.contentId) add(`l.content_id = $?`, f.contentId);
+  if (f.creatorId) add(`l.creator_id = $?`, f.creatorId);
+  if (f.payerKind) add(`l.payer_kind = $?`, f.payerKind);
+  if (f.status) add(`l.status = $?`, f.status);
+  if (f.from) add(`l.created_at >= $?`, f.from);
+  if (f.to) add(`l.created_at <= $?`, f.to);
+  if (f.search) {
+    params.push(`%${f.search}%`);
+    const p = `$${params.length}`;
+    // Match tx hash / payer address, plus the human-readable content + creator.
+    where.push(
+      `(l.tx_hash ILIKE ${p} OR l.payer_id ILIKE ${p} OR c.title ILIKE ${p} OR u.display_name ILIKE ${p} OR u.handle ILIKE ${p})`
+    );
+  }
+  const whereSql = where.length ? `WHERE ${where.join(" AND ")}` : "";
+  params.push(Math.min(f.limit ?? 50, 500), f.offset ?? 0);
+  return query<LedgerRowEnriched>(
+    `SELECT l.*,
+            c.title  AS content_title,
+            c.slug   AS content_slug,
+            u.display_name AS creator_name,
+            u.handle AS creator_handle
+     FROM payment_ledger l
+     LEFT JOIN content c ON c.id = l.content_id
+     LEFT JOIN users   u ON u.id = l.creator_id
+     ${whereSql}
+     ORDER BY l.created_at DESC
+     LIMIT $${params.length - 1} OFFSET $${params.length}`,
+    params
+  );
 }
 
-export function creatorEarnings(creatorId: string) {
-  const agg = db()
-    .prepare(
-      `SELECT COUNT(*) as payments,
-              COALESCE(SUM(CAST(creator_amount AS INTEGER)),0) as earned,
-              COALESCE(SUM(line_count),0) as lines_sold
-       FROM payments WHERE creator_id = ?`
-    )
-    .get(creatorId) as { payments: number; earned: number; lines_sold: number };
-  const history = db()
-    .prepare(
-      `SELECT p.*, ct.title as title FROM payments p JOIN content ct ON ct.id = p.content_id
-       WHERE p.creator_id = ? ORDER BY p.created_at DESC LIMIT 100`
-    )
-    .all(creatorId) as any[];
-  return { ...agg, earned: String(agg.earned), history };
+// ─────────────────────────────────────────────────────────────────────────────
+// Payouts
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function createPayout(creatorId: string, amount: string, wallet: string): Promise<Payout> {
+  return queryOne<Payout>(
+    `INSERT INTO payouts (creator_id, amount, wallet_address, status) VALUES ($1,$2,$3,'initiated') RETURNING *`,
+    [creatorId, amount, wallet]
+  ) as Promise<Payout>;
+}
+export function confirmPayout(id: string, txHash: string): Promise<Payout | undefined> {
+  return queryOne<Payout>(
+    `UPDATE payouts SET status='confirmed', tx_hash=$2, confirmed_at=NOW() WHERE id=$1 RETURNING *`,
+    [id, txHash]
+  );
+}
+export function listPayouts(creatorId: string): Promise<Payout[]> {
+  return query<Payout>(`SELECT * FROM payouts WHERE creator_id=$1 ORDER BY created_at DESC`, [creatorId]);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Admin events (the live activity stream source of truth)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface RecordAdminEventInput {
+  eventType: AdminEventType;
+  actorId?: string | null;
+  payerId?: string | null;
+  contentId?: string | null;
+  blockIndex?: number | null;
+  amountGross?: string | null;
+  metadata?: Record<string, unknown> | null;
+}
+
+export function recordAdminEvent(input: RecordAdminEventInput): Promise<AdminEvent> {
+  return queryOne<AdminEvent>(
+    `INSERT INTO admin_events
+       (event_type, actor_id, payer_id, content_id, block_index, amount_gross, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
+    [
+      input.eventType,
+      input.actorId ?? null,
+      input.payerId ?? null,
+      input.contentId ?? null,
+      input.blockIndex ?? null,
+      input.amountGross ?? null,
+      input.metadata ? JSON.stringify(input.metadata) : null,
+    ]
+  ) as Promise<AdminEvent>;
+}
+
+export function recentAdminEvents(limit = 500): Promise<AdminEvent[]> {
+  return query<AdminEvent>(
+    `SELECT * FROM admin_events ORDER BY created_at DESC LIMIT $1`,
+    [Math.min(limit, 500)]
+  );
+}
+
+/** Events strictly newer than a timestamp (SSE polling cursor). */
+export function adminEventsAfter(after: Date, limit = 50): Promise<AdminEvent[]> {
+  return query<AdminEvent>(
+    `SELECT * FROM admin_events WHERE created_at > $1 ORDER BY created_at ASC LIMIT $2`,
+    [after, limit]
+  );
+}
+
+/** Replay events newer than a given event id (for SSE Last-Event-ID). */
+export async function adminEventsSince(lastEventId: string, limit = 20): Promise<AdminEvent[]> {
+  const anchor = await queryOne<{ created_at: Date }>(
+    `SELECT created_at FROM admin_events WHERE id = $1`,
+    [lastEventId]
+  );
+  if (!anchor) return [];
+  return query<AdminEvent>(
+    `SELECT * FROM admin_events WHERE created_at > $1 ORDER BY created_at ASC LIMIT $2`,
+    [anchor.created_at, limit]
+  );
+}
+
+/** Retention: delete events older than N days. Returns deleted count. */
+export async function pruneAdminEvents(days = 90): Promise<number> {
+  const r = await query<{ id: string }>(
+    `DELETE FROM admin_events WHERE created_at < NOW() - ($1 || ' days')::interval RETURNING id`,
+    [String(days)]
+  );
+  return r.length;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Agent sessions
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function upsertAgentSession(
+  sessionKey: string,
+  ip: string | null,
+  userAgent: string | null
+): Promise<AgentSession> {
+  return queryOne<AgentSession>(
+    `INSERT INTO agent_sessions (session_key, ip, user_agent)
+       VALUES ($1,$2,$3)
+     ON CONFLICT (session_key) DO UPDATE SET last_seen = NOW(),
+       ip = COALESCE(agent_sessions.ip, EXCLUDED.ip),
+       user_agent = COALESCE(agent_sessions.user_agent, EXCLUDED.user_agent)
+     RETURNING *`,
+    [sessionKey, ip, userAgent]
+  ) as Promise<AgentSession>;
+}
+
+export function getAgentSession(sessionKey: string): Promise<AgentSession | undefined> {
+  return queryOne<AgentSession>(`SELECT * FROM agent_sessions WHERE session_key = $1`, [sessionKey]);
+}
+
+export function bumpAgent402(sessionKey: string): Promise<unknown> {
+  return query(
+    `UPDATE agent_sessions SET total_402_hits = total_402_hits + 1, last_seen = NOW() WHERE session_key = $1`,
+    [sessionKey]
+  );
+}
+export function bumpAgentUnlock(sessionKey: string, spentUsdc: string): Promise<unknown> {
+  return query(
+    `UPDATE agent_sessions
+       SET total_unlocks = total_unlocks + 1,
+           total_spent_usdc = total_spent_usdc + $2,
+           last_seen = NOW()
+     WHERE session_key = $1`,
+    [sessionKey, spentUsdc]
+  );
+}
+export function setAgentBlocked(sessionKey: string, blocked: boolean): Promise<AgentSession | undefined> {
+  return queryOne<AgentSession>(
+    `UPDATE agent_sessions SET blocked=$2 WHERE session_key=$1 RETURNING *`,
+    [sessionKey, blocked]
+  );
+}
+export function setAgentTrusted(sessionKey: string, trusted: boolean): Promise<AgentSession | undefined> {
+  return queryOne<AgentSession>(
+    `UPDATE agent_sessions SET trusted=$2 WHERE session_key=$1 RETURNING *`,
+    [sessionKey, trusted]
+  );
+}
+/** Append a note to the agent session behind a payer_id like 'agent:<key>'. */
+export function flagAgentSessionByPayer(payerId: string, note: string): Promise<unknown> {
+  const sessionKey = payerId.startsWith("agent:") ? payerId.slice("agent:".length) : payerId;
+  return query(
+    `UPDATE agent_sessions
+       SET notes = COALESCE(notes || ' | ', '') || $2, last_seen = NOW()
+     WHERE session_key = $1`,
+    [sessionKey, note]
+  );
+}
+
+export function listAgentSessions(limit = 100): Promise<AgentSession[]> {
+  return query<AgentSession>(
+    `SELECT * FROM agent_sessions ORDER BY last_seen DESC LIMIT $1`,
+    [Math.min(limit, 500)]
+  );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Named counters (discovery funnel)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function bumpCounter(key: string): Promise<unknown> {
+  return query(
+    `INSERT INTO counters (key, value) VALUES ($1, 1)
+     ON CONFLICT (key) DO UPDATE SET value = counters.value + 1`,
+    [key]
+  );
+}
+
+export async function getCounter(key: string): Promise<number> {
+  const r = await queryOne<{ value: string }>(`SELECT value::text AS value FROM counters WHERE key = $1`, [key]);
+  return Number(r?.value ?? 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Health probes
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function lastCompletedPayment(): Promise<{ created_at: Date; gross_amount: string } | undefined> {
+  return queryOne<{ created_at: Date; gross_amount: string }>(
+    `SELECT created_at, gross_amount FROM payment_ledger WHERE status='completed' ORDER BY created_at DESC LIMIT 1`
+  );
+}
+export function lastSignup(): Promise<{ created_at: Date } | undefined> {
+  return queryOne<{ created_at: Date }>(`SELECT created_at FROM users ORDER BY created_at DESC LIMIT 1`);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Export jobs (async CSV)
+// ─────────────────────────────────────────────────────────────────────────────
+
+export function createExportJob(adminId: string, filters: Record<string, unknown>): Promise<ExportJob> {
+  return queryOne<ExportJob>(
+    `INSERT INTO export_jobs (admin_id, filters, status) VALUES ($1,$2,'pending') RETURNING *`,
+    [adminId, JSON.stringify(filters)]
+  ) as Promise<ExportJob>;
+}
+export function getExportJob(id: string): Promise<ExportJob | undefined> {
+  return queryOne<ExportJob>(`SELECT * FROM export_jobs WHERE id = $1`, [id]);
+}
+export function updateExportJob(
+  id: string,
+  patch: { status?: string; rowCount?: number; filePath?: string; completed?: boolean }
+): Promise<ExportJob | undefined> {
+  return queryOne<ExportJob>(
+    `UPDATE export_jobs SET
+       status = COALESCE($2, status),
+       row_count = COALESCE($3, row_count),
+       file_path = COALESCE($4, file_path),
+       completed_at = CASE WHEN $5 THEN NOW() ELSE completed_at END
+     WHERE id = $1 RETURNING *`,
+    [id, patch.status ?? null, patch.rowCount ?? null, patch.filePath ?? null, patch.completed ?? false]
+  );
 }

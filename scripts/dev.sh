@@ -1,14 +1,18 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────
-# LinePay Cite — start everything in one go (no terminal hopping).
+# LinePay Cite — one command to set up AND run everything.
 #
-#   bash scripts/dev.sh                 # start, seed if empty, demo traffic
-#   bash scripts/dev.sh --fresh         # wipe DB + .next first (clean slate)
-#   bash scripts/dev.sh --no-traffic    # start + seed, skip demo traffic
-#   bash scripts/dev.sh --no-seed       # just start the server
-#   PORT=3001 bash scripts/dev.sh       # use a different port
+#   npm run up                  # install deps, ensure DB, migrate, seed, start
+#   npm run up:fresh            # also reset the local Docker DB + .next first
+#   bash scripts/dev.sh --no-traffic   # start without generating demo traffic
+#   bash scripts/dev.sh --no-seed      # just start the server
+#   PORT=3001 npm run up        # use a different port
 #
-# Leaves the dev server running in the foreground. Press Ctrl-C to stop it.
+# Zero-config for forkers: if DATABASE_URL is not set anywhere, a local
+# Postgres is started via Docker automatically. If you already have a
+# DATABASE_URL (e.g. Supabase), it is used and Docker is skipped.
+#
+# Leaves the dev server in the foreground. Press Ctrl-C to stop it.
 # ──────────────────────────────────────────────────────────────────────────
 set -euo pipefail
 cd "$(dirname "$0")/.."
@@ -25,68 +29,117 @@ done
 
 PORT="${PORT:-3000}"
 DEV_LOG="/tmp/linepay-dev.log"
+PG_CONTAINER="linepay-postgres"
+WEB_ENV="apps/web/.env.local"
 
 echo "▸ LinePay Cite — one-command start"
 
-# 1. Env files
-if [ ! -f .env ]; then cp .env.example .env; echo "  created .env (simulate mode)"; fi
-cp .env apps/web/.env.local 2>/dev/null || true
+# ── 1. Env files (never clobber an existing apps/web/.env.local) ─────────────
+if [ ! -f "$WEB_ENV" ]; then
+  if [ -f .env ]; then cp .env "$WEB_ENV"; else cp .env.example "$WEB_ENV"; fi
+  echo "  created $WEB_ENV"
+fi
+[ -f .env ] || cp .env.example .env
 
-# 2. Dependencies — install if missing OR out of date (new wagmi/rainbowkit deps)
-if [ ! -d node_modules ] || [ ! -d node_modules/next ] || [ ! -d node_modules/wagmi ] || [ ! -d node_modules/@rainbow-me/rainbowkit ]; then
+# Read a var from process env, then apps/web/.env.local, then .env.
+get_env() {
+  local name="$1"
+  if [ -n "${!name:-}" ]; then echo "${!name}"; return; fi
+  local f v
+  for f in "$WEB_ENV" .env; do
+    [ -f "$f" ] || continue
+    v=$(grep -E "^${name}=" "$f" | head -1 | cut -d= -f2- | sed 's/^["'"'"']//; s/["'"'"']$//')
+    if [ -n "$v" ]; then echo "$v"; return; fi
+  done
+  echo ""
+}
+ensure_line() { # file key value — append only if key absent
+  local f="$1" k="$2" v="$3"; touch "$f"
+  grep -qE "^${k}=" "$f" || echo "${k}=${v}" >> "$f"
+}
+
+# ── 2. Dependencies ──────────────────────────────────────────────────────────
+if [ ! -d node_modules ] || [ ! -d node_modules/next ] || [ ! -d node_modules/pg ] || [ ! -d node_modules/next-auth ]; then
   echo "▸ installing dependencies…"
   npm install || npm install --legacy-peer-deps
 fi
 
-# 3. Optional clean slate
-if [ "$FRESH" = "1" ]; then
-  echo "▸ --fresh: wiping DB + .next"
-  rm -f linepay.db linepay.db-* apps/web/linepay.db apps/web/linepay.db-*
-  rm -rf apps/web/.next
+# ── 3. Database: use DATABASE_URL if set, else provision local Postgres ─────
+DB_URL="$(get_env DATABASE_URL)"
+if [ "$FRESH" = "1" ] && docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${PG_CONTAINER}$"; then
+  echo "▸ --fresh: removing local Postgres container"
+  docker rm -f "$PG_CONTAINER" >/dev/null 2>&1 || true
+  DB_URL=""  # force re-provision
 fi
-# Always clear a stale *production* build so `next dev` doesn't trip on it.
-if [ -f apps/web/.next/BUILD_ID ]; then rm -rf apps/web/.next; fi
 
-# 4. Stop a previous instance started by this script
+if [ -z "$DB_URL" ]; then
+  if command -v docker >/dev/null 2>&1; then
+    echo "▸ no DATABASE_URL set — starting local Postgres via Docker…"
+    if docker ps -a --format '{{.Names}}' | grep -q "^${PG_CONTAINER}$"; then
+      docker start "$PG_CONTAINER" >/dev/null
+    else
+      docker run -d --name "$PG_CONTAINER" \
+        -e POSTGRES_PASSWORD=postgres -e POSTGRES_DB=linepay \
+        -p 5432:5432 postgres:16 >/dev/null
+    fi
+    echo -n "  waiting for Postgres "
+    for i in $(seq 1 30); do
+      if docker exec "$PG_CONTAINER" pg_isready -U postgres >/dev/null 2>&1; then echo " ready"; break; fi
+      echo -n "."; sleep 1
+      [ "$i" -eq 30 ] && { echo " timeout"; exit 1; }
+    done
+    DB_URL="postgres://postgres:postgres@localhost:5432/linepay"
+    ensure_line "$WEB_ENV" DATABASE_URL "$DB_URL"
+    ensure_line "$WEB_ENV" PGSSL "disable"
+    ensure_line .env DATABASE_URL "$DB_URL"
+  else
+    echo "✗ DATABASE_URL is not set and Docker is unavailable."
+    echo "  Set DATABASE_URL in $WEB_ENV (e.g. a Supabase Session pooler URL) and re-run."
+    exit 1
+  fi
+fi
+export DATABASE_URL="$DB_URL"
+
+# ── 4. Migrate + seed (direct to Postgres; no server needed) ────────────────
+echo "▸ running migrations…"
+( cd apps/web && npm run db:migrate )
+if [ "$SEED" = "1" ]; then
+  echo "▸ seeding sample content (skips if already seeded)…"
+  ( cd apps/web && npm run db:seed )
+fi
+
+# Clear a stale production build so `next dev` doesn't trip on it.
+[ "$FRESH" = "1" ] && rm -rf apps/web/.next
+[ -f apps/web/.next/BUILD_ID ] && rm -rf apps/web/.next
+
+# ── 5. Stop a previous instance from this script ────────────────────────────
 if [ -f /tmp/linepay-dev.pid ] && kill -0 "$(cat /tmp/linepay-dev.pid)" 2>/dev/null; then
-  echo "▸ stopping previous dev server ($(cat /tmp/linepay-dev.pid))"
-  kill "$(cat /tmp/linepay-dev.pid)" 2>/dev/null || true
-  sleep 1
+  kill "$(cat /tmp/linepay-dev.pid)" 2>/dev/null || true; sleep 1
 fi
 
-# 5. Start the dev server
+# ── 6. Start the dev server ──────────────────────────────────────────────────
 echo "▸ starting Next.js dev server…"
 ( cd apps/web && PORT="$PORT" npm run dev ) >"$DEV_LOG" 2>&1 &
 DEV_PID=$!
 echo "$DEV_PID" > /tmp/linepay-dev.pid
 trap 'echo; echo "▸ stopping dev server ($DEV_PID)"; kill "$DEV_PID" 2>/dev/null || true; rm -f /tmp/linepay-dev.pid' EXIT INT TERM
 
-# 6. Wait until it actually answers (and learn the real port from the log)
+# ── 7. Wait until it answers ────────────────────────────────────────────────
 echo -n "  waiting for the server "
 URL=""
 for i in $(seq 1 90); do
   if ! kill -0 "$DEV_PID" 2>/dev/null; then
-    echo " — server exited early. Last log lines:"; tail -20 "$DEV_LOG"; exit 1
+    echo " — server exited early. Last log lines:"; tail -25 "$DEV_LOG"; exit 1
   fi
   URL="$(grep -oE 'http://localhost:[0-9]+' "$DEV_LOG" | head -1 || true)"
   [ -z "$URL" ] && URL="http://localhost:$PORT"
-  if curl -sf "$URL/api/catalog" >/dev/null 2>&1; then echo " up at $URL"; break; fi
+  if curl -sf "$URL/" >/dev/null 2>&1; then echo " up at $URL"; break; fi
   echo -n "."; sleep 1
-  if [ "$i" -eq 90 ]; then echo " timeout — see $DEV_LOG"; tail -20 "$DEV_LOG"; exit 1; fi
+  [ "$i" -eq 90 ] && { echo " timeout — see $DEV_LOG"; tail -25 "$DEV_LOG"; exit 1; }
 done
 export APP_BASE_URL="$URL"
 
-# 7. Seed sample content only if the catalog is empty (re-runs won't duplicate)
-if [ "$SEED" = "1" ]; then
-  if curl -s "$URL/api/catalog" | grep -q '"id"'; then
-    echo "▸ catalog already has content — skipping seed"
-  else
-    echo "▸ seeding sample creators + content…"
-    npm run seed
-  fi
-fi
-
-# 8. Demo traffic (human + agent payments) so dashboards are live
+# ── 8. Demo traffic (agent unlocks) so dashboards are populated ─────────────
 if [ "$TRAFFIC" = "1" ]; then
   echo "▸ generating demo traffic…"
   npm run demo:traffic || true
@@ -96,17 +149,15 @@ cat <<EOF
 
 ✅ Running. (Ctrl-C here stops the server.)
    • Landing        $URL
-   • Read / pay     $URL/read
-   • Marketplace    $URL/market
-   • Creator portal $URL/creators
-   • Agent demo     $URL/demo
-   • Creator docs   $URL/docs
+   • Marketplace    $URL/marketplace
+   • Creator portal $URL/dashboard      (sign in with Google/GitHub)
+   • Admin          $URL/admin          (sign in as ADMIN_EMAIL)
+   • Docs           $URL/docs
 
    Run the buyer agent in another terminal (server stays up here):
-     npm run agent -- "How do nanopayments change online writing?"
+     npm run agent -- --url $URL --slug solidity-security-skills --simulate
 
    Server log: $DEV_LOG
 EOF
 
-# 9. Hand the terminal to the server (foreground)
 wait "$DEV_PID"

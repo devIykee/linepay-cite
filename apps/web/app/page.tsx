@@ -31,11 +31,11 @@ export default function Home() {
             per line, per citation, settled instantly as USDC on Arc through Circle Gateway.
           </p>
           <div className="flex flex-col items-center justify-center gap-gutter pt-stack-md sm:flex-row">
-            <Link href="/read" className="btn-primary w-full px-10 py-4 !text-body-lg editorial-shadow sm:w-auto">
-              Read &amp; pay per line →
+            <Link href="/marketplace" className="btn-primary w-full px-10 py-4 !text-body-lg editorial-shadow sm:w-auto">
+              Browse the marketplace →
             </Link>
-            <Link href="/demo" className="btn-outline w-full px-10 py-4 !text-body-lg sm:w-auto">
-              Watch an agent pay →
+            <Link href="/dashboard" className="btn-outline w-full px-10 py-4 !text-body-lg sm:w-auto">
+              Start publishing →
             </Link>
           </div>
           <StatsBar />
@@ -102,8 +102,8 @@ export default function Home() {
             Put a line behind LinePay and every reader — human or agent — pays you for it.
           </p>
           <div className="flex justify-center gap-gutter pt-stack-md">
-            <Link href="/creators" className="btn-primary px-12 py-4 !text-body-lg editorial-shadow">Start Writing</Link>
-            <Link href="/read" className="btn-outline px-12 py-4 !text-body-lg">Start Reading</Link>
+            <Link href="/dashboard" className="btn-primary px-12 py-4 !text-body-lg editorial-shadow">Start Writing</Link>
+            <Link href="/marketplace" className="btn-outline px-12 py-4 !text-body-lg">Start Reading</Link>
           </div>
         </div>
       </section>

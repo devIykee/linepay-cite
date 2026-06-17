@@ -2,10 +2,18 @@
 const nextConfig = {
   // The SDK + agent ship as raw TypeScript in the monorepo; transpile them here.
   transpilePackages: ["@linepay/sdk", "@linepay/agent"],
-  serverExternalPackages: ["better-sqlite3"],
+  // Keep the Postgres driver out of the bundler (Node runtime resolves it).
+  serverExternalPackages: ["pg"],
   experimental: {
     // Allow importing the workspace SDK/agent source directly.
     externalDir: true,
+  },
+  // Dot-folders aren't routable in app/, so expose the agent discovery doc via
+  // a rewrite to a normal API route.
+  async rewrites() {
+    return [
+      { source: "/.well-known/agent-payment.json", destination: "/api/well-known/agent-payment" },
+    ];
   },
   webpack: (config) => {
     // We use ESM-style `.js` import specifiers that actually point at `.ts`

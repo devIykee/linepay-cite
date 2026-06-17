@@ -1,74 +1,55 @@
 #!/usr/bin/env node
 /**
- * Generates realistic demo traction against a running server: a mix of human
- * reader payments and autonomous agent runs across the catalog, so the home
- * stats bar, creator dashboards, and live feed are populated for judges.
+ * Generates demo traction against a running server so the admin dashboards,
+ * funnel, and home stats are populated: an autonomous agent discovers content
+ * and unlocks blocks via the 402 → X-Payment-Token flow (simulate mode).
  *
  *   node scripts/demo-traffic.mjs
  *   APP_BASE_URL=https://… node scripts/demo-traffic.mjs
  */
 const BASE = process.env.APP_BASE_URL || "http://localhost:3000";
 
-const QUERIES = [
-  "How do nanopayments change the economics of online writing?",
-  "How do x402 paywalls and revenue splits work on Arc?",
-  "What makes per-line pricing better than subscriptions?",
-  "continue reading The Clockwork Archive",
-];
-
-async function getJson(path, opts) {
-  const res = await fetch(`${BASE}${path}`, opts);
-  return res.json();
-}
-
-async function humanReads(item) {
-  // A human unlocks two chunks of a piece (lines 4-13, 14-23 where available).
-  const ranges = [
-    [4, Math.min(item.line_count, 13)],
-    [14, Math.min(item.line_count, 23)],
-  ];
-  for (const [lineStart, lineEnd] of ranges) {
-    if (lineEnd < lineStart) continue;
-    const d = await getJson(`/api/reader/${item.id}`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ lineStart, lineEnd }),
-    });
-    if (d.paid) console.log(`  👤 human paid ${d.amountDisplay} → @${item.creator_handle} (L${lineStart}-${lineEnd})`);
-  }
-}
-
-async function agentRuns() {
-  for (const q of QUERIES) {
-    const d = await getJson(`/api/research`, {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ query: q }),
-    });
-    if (d.citations) console.log(`  🤖 agent "${q.slice(0, 40)}…" → ${d.citations.length} paid sources, spent ${d.spentDisplay}`);
-  }
-}
+const tok = (k) => `sim_${Date.now().toString(36)}_${k}_${Math.random().toString(36).slice(2, 8)}`;
 
 async function main() {
   console.log(`Generating demo traffic against ${BASE} …`);
-  const { items } = await getJson("/api/catalog");
+
+  // Discovery hit (funnel: .well-known).
+  await fetch(`${BASE}/.well-known/agent-payment.json`).catch(() => {});
+
+  const res = await fetch(`${BASE}/api/marketplace`).catch(() => null);
+  const { items } = res ? await res.json() : { items: [] };
   if (!items?.length) {
     console.error("No content — run `npm run seed` first.");
     process.exit(1);
   }
-  // Humans read the first few articles.
-  for (const item of items.filter((i) => i.kind === "article").slice(0, 4)) {
-    await humanReads(item);
-  }
-  // Agents do several research runs.
-  await agentRuns();
 
-  const s = await getJson("/api/stats");
-  console.log(`\n✅ Traction: ${s.volumeDisplay} volume · ${s.payments} payments (👤 ${s.humanPayments} / 🤖 ${s.agentPayments}) · ${s.linesSold} lines · ${s.toCreatorsDisplay} to creators`);
+  let unlocks = 0;
+  for (const item of items) {
+    // Free block 0 (funnel: block-0 fetch).
+    await fetch(`${BASE}/read/${item.slug}/agent-skills.md`).catch(() => {});
+    const blocks = Math.min(item.blockCount || 3, 3);
+    for (let b = 1; b <= blocks; b++) {
+      // First request → 402 (records a 402_HIT + upserts the agent session).
+      await fetch(`${BASE}/read/${item.slug}/agent-skills.md?block=${b}`).catch(() => {});
+      // Pay with a simulate token → block returned + completed ledger row.
+      const r = await fetch(`${BASE}/read/${item.slug}/agent-skills.md?block=${b}`, {
+        headers: { "X-Payment-Token": tok(`${item.slug}-${b}`) },
+      }).catch(() => null);
+      if (r && r.ok) {
+        unlocks++;
+        console.log(`  🤖 unlocked "${item.title}" block ${b}`);
+      }
+    }
+  }
+
+  const s = await (await fetch(`${BASE}/api/stats`)).json().catch(() => ({}));
+  console.log(
+    `\n✅ ${unlocks} agent unlock(s). Traction: ${s.volumeDisplay ?? "$0"} · ${s.payments ?? 0} payments (🤖 ${s.agentPayments ?? 0}) · ${s.toCreatorsDisplay ?? "$0"} to creators`
+  );
 }
 
 main().catch((e) => {
   console.error("demo-traffic failed:", e.message);
-  console.error("Is the server running + seeded?  npm run dev  then  npm run seed");
   process.exit(1);
 });

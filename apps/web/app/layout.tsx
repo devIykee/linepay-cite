@@ -2,7 +2,7 @@ import "./globals.css";
 import type { Metadata } from "next";
 import Link from "next/link";
 import Providers from "./providers";
-import WalletButton from "@/components/WalletButton";
+import UserMenu from "@/components/UserMenu";
 
 export const metadata: Metadata = {
   title: "LinePay Cite — get paid every time someone reads a line",
@@ -24,6 +24,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap"
           rel="stylesheet"
         />
+        {/* Agent payment discovery — lets crawling agents find the 402 system. */}
+        <link rel="payment-manifest" href="/.well-known/agent-payment.json" />
       </head>
       <body className="bg-background font-body-md text-body-md text-on-surface antialiased min-h-screen flex flex-col selection:bg-primary-fixed selection:text-on-primary-fixed">
         <Providers>
@@ -38,13 +40,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </Link>
               <div className="hidden items-center gap-stack-lg md:flex">
                 <NavLink href="/">Home</NavLink>
-                <NavLink href="/read">Read</NavLink>
-                <NavLink href="/market">Marketplace</NavLink>
-                <NavLink href="/creators">Writers</NavLink>
-                <NavLink href="/demo">Agent Demo</NavLink>
+                <NavLink href="/marketplace">Marketplace</NavLink>
+                <NavLink href="/dashboard">Dashboard</NavLink>
                 <NavLink href="/docs">Docs</NavLink>
               </div>
-              <WalletButton />
+              <UserMenu />
             </nav>
           </header>
 
@@ -58,8 +58,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
               <div className="flex gap-gutter">
                 <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/docs">Docs</Link>
-                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/market">Marketplace</Link>
-                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/read">Read</Link>
+                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/marketplace">Marketplace</Link>
+                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/dashboard">Dashboard</Link>
               </div>
             </div>
           </footer>

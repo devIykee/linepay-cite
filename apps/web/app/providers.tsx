@@ -2,6 +2,7 @@
 
 import "@rainbow-me/rainbowkit/styles.css";
 import { useState } from "react";
+import { SessionProvider } from "next-auth/react";
 import { WagmiProvider } from "wagmi";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { RainbowKitProvider, lightTheme } from "@rainbow-me/rainbowkit";
@@ -16,19 +17,21 @@ export default function Providers({ children }: { children: React.ReactNode }) {
   const [queryClient] = useState(() => new QueryClient());
 
   return (
-    <WagmiProvider config={wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <RainbowKitProvider
-          theme={lightTheme({
-            accentColor: "#99411e",
-            accentColorForeground: "#ffffff",
-            borderRadius: "medium",
-            fontStack: "system",
-          })}
-        >
-          <ToastProvider>{children}</ToastProvider>
-        </RainbowKitProvider>
-      </QueryClientProvider>
-    </WagmiProvider>
+    <SessionProvider>
+      <WagmiProvider config={wagmiConfig}>
+        <QueryClientProvider client={queryClient}>
+          <RainbowKitProvider
+            theme={lightTheme({
+              accentColor: "#99411e",
+              accentColorForeground: "#ffffff",
+              borderRadius: "medium",
+              fontStack: "system",
+            })}
+          >
+            <ToastProvider>{children}</ToastProvider>
+          </RainbowKitProvider>
+        </QueryClientProvider>
+      </WagmiProvider>
+    </SessionProvider>
   );
 }

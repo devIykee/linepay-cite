@@ -156,7 +156,7 @@ const settlement = await facilitator.settle(paymentPayload, paymentRequirements)
       <p className="font-body-sm text-on-surface-variant">Set <span className="font-data-mono text-body-sm">PAYMENTS_MODE=live</span> + <span className="font-data-mono text-body-sm">CIRCLE_API_KEY</span> + <span className="font-data-mono text-body-sm">BUYER_PRIVATE_KEY</span> and run <span className="font-data-mono text-body-sm">bash scripts/circle-setup.sh</span> to install the CLIs and create funded testnet wallets.</p>
 
       <H2 id="onchain">On-chain marketplace (alternative)</H2>
-      <p className="font-body-md text-on-surface-variant">Prefer a whole-item, fully on-chain sale? Publish to the <span className="font-data-mono text-body-sm">AgentMarketplace</span> contract from the <Link href="/market" className="text-primary">Marketplace</Link>. Buyers <span className="font-data-mono text-body-sm">approve()</span> USDC then <span className="font-data-mono text-body-sm">buyContent(id)</span>; funds go buyer→author directly, access is recorded on-chain, and agents discover new skills by listening to the <span className="font-data-mono text-body-sm">ContentPublished</span> event:</p>
+      <p className="font-body-md text-on-surface-variant">Prefer a whole-item, fully on-chain sale? Publish to the <span className="font-data-mono text-body-sm">AgentMarketplace</span> contract from the <Link href="/marketplace" className="text-primary">Marketplace</Link>. Buyers <span className="font-data-mono text-body-sm">approve()</span> USDC then <span className="font-data-mono text-body-sm">buyContent(id)</span>; funds go buyer→author directly, access is recorded on-chain, and agents discover new skills by listening to the <span className="font-data-mono text-body-sm">ContentPublished</span> event:</p>
       <Code lang="typescript">{`import { createPublicClient, http, parseAbiItem } from "viem";
 const client = createPublicClient({ transport: http(process.env.ARC_RPC_URL) });
 const unwatch = client.watchEvent({
@@ -173,7 +173,7 @@ const unwatch = client.watchEvent({
         <p className="mb-stack-md font-body-md text-on-surface-variant">Publish your first skill or article in under a minute.</p>
         <div className="flex justify-center gap-gutter">
           <Link href="/creators" className="btn-primary px-8 py-3">Open Creator Portal</Link>
-          <Link href="/market" className="btn-outline px-8 py-3">On-chain Marketplace</Link>
+          <Link href="/marketplace" className="btn-outline px-8 py-3">On-chain Marketplace</Link>
         </div>
       </div>
     </div>

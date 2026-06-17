@@ -1,31 +1,33 @@
-import { NextResponse } from "next/server";
-import { db } from "@/lib/db";
-import { formatUsdc } from "@linepay/sdk";
+import { queryOne } from "@/lib/db";
 
-/** Platform-wide traction stats for the hackathon (volume, payments, splits). */
+export const runtime = "nodejs";
+export const dynamic = "force-dynamic";
+
+/** Public traction stats for the landing hero (no auth). */
 export async function GET() {
-  const d = db();
-  const totals = d.prepare(
-    `SELECT COUNT(*) as payments,
-            COALESCE(SUM(CAST(amount AS INTEGER)),0) as volume,
-            COALESCE(SUM(CAST(creator_amount AS INTEGER)),0) as to_creators,
-            COALESCE(SUM(line_count),0) as lines_sold,
-            SUM(CASE WHEN payer_kind='human' THEN 1 ELSE 0 END) as human_payments,
-            SUM(CASE WHEN payer_kind='agent' THEN 1 ELSE 0 END) as agent_payments
-     FROM payments`
-  ).get() as any;
-  const creators = (d.prepare(`SELECT COUNT(*) as n FROM creators`).get() as any).n;
-  const content = (d.prepare(`SELECT COUNT(*) as n FROM content`).get() as any).n;
-
-  return NextResponse.json({
-    payments: totals.payments,
-    humanPayments: totals.human_payments,
-    agentPayments: totals.agent_payments,
-    linesSold: totals.lines_sold,
-    creators,
-    content,
-    volumeBaseUnits: String(totals.volume),
-    volumeDisplay: formatUsdc(totals.volume),
-    toCreatorsDisplay: formatUsdc(totals.to_creators),
+  const r = await queryOne<{
+    payments: number;
+    human: number;
+    agent: number;
+    volume: string;
+    to_creators: string;
+  }>(
+    `SELECT
+       COUNT(*) FILTER (WHERE status='completed')::int AS payments,
+       COUNT(*) FILTER (WHERE status='completed' AND payer_kind='human')::int AS human,
+       COUNT(*) FILTER (WHERE status='completed' AND payer_kind='agent')::int AS agent,
+       COALESCE(SUM(gross_amount) FILTER (WHERE status='completed'),0)::text AS volume,
+       COALESCE(SUM(creator_amount) FILTER (WHERE status='completed'),0)::text AS to_creators
+     FROM payment_ledger`
+  );
+  const c = await queryOne<{ creators: number }>(`SELECT COUNT(*)::int AS creators FROM users`);
+  return Response.json({
+    volumeDisplay: `$${Number(r?.volume ?? 0).toFixed(4)}`,
+    toCreatorsDisplay: `$${Number(r?.to_creators ?? 0).toFixed(4)}`,
+    payments: r?.payments ?? 0,
+    humanPayments: r?.human ?? 0,
+    agentPayments: r?.agent ?? 0,
+    linesSold: r?.payments ?? 0,
+    creators: c?.creators ?? 0,
   });
 }
