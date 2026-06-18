@@ -2,6 +2,8 @@ import { NextRequest } from "next/server";
 import { getAddress, verifyMessage } from "viem";
 import type { Address, Hex } from "viem";
 import { createPaySession } from "@/lib/store";
+import { currentSession } from "@/lib/session";
+import { getUserById } from "@/lib/store";
 import { validateWallet } from "@/lib/validate-wallet";
 import { normalizeUsdc } from "@/lib/money";
 import { paySessionAuthMessage } from "@/lib/burn-intent";
@@ -27,6 +29,7 @@ export async function POST(req: NextRequest) {
       sessionAddress?: string;
       cap?: string | number;
       signature?: Hex;
+      source?: "embedded" | "external";
     };
 
     const mainCheck = validateWallet(body.mainWallet);
@@ -50,18 +53,34 @@ export async function POST(req: NextRequest) {
     const mainWallet = mainCheck.checksummed as Address;
     const sessionAddress = sessCheck.checksummed as Address;
 
-    // Verify the one-time ownership signature over the bound message, rebuilt
-    // with the SAME cap string the client used so the digests match.
-    const message = paySessionAuthMessage({ mainWallet, sessionAddress, cap: signedCap });
-    if (!body.signature) return Response.json({ error: "missing_signature" }, { status: 400 });
-    let valid = false;
-    try {
-      valid = await verifyMessage({ address: mainWallet, message, signature: body.signature });
-    } catch {
-      valid = false;
+    // Authorize ownership of `mainWallet`:
+    //  • embedded → the wallet was minted by us for this signed-in user, so the
+    //    NextAuth session IS the proof. No on-chain signature is needed (the SCA
+    //    would sign via ERC-1271, which isn't EOA-recoverable anyway).
+    //  • external → verify the one-time EOA signature over the bound message,
+    //    rebuilt with the SAME cap string the client signed (so digests match).
+    if (body.source === "embedded") {
+      const session = await currentSession();
+      if (!session?.user?.id)
+        return Response.json({ error: "unauthorized", friendly: "Sign in to use your wallet." }, { status: 401 });
+      const user = await getUserById(session.user.id);
+      const owns =
+        user?.embedded_wallet_address &&
+        getAddress(user.embedded_wallet_address) === mainWallet;
+      if (!owns)
+        return Response.json({ error: "embedded_mismatch", friendly: "That isn't your embedded wallet." }, { status: 403 });
+    } else {
+      const message = paySessionAuthMessage({ mainWallet, sessionAddress, cap: signedCap });
+      if (!body.signature) return Response.json({ error: "missing_signature" }, { status: 400 });
+      let valid = false;
+      try {
+        valid = await verifyMessage({ address: mainWallet, message, signature: body.signature });
+      } catch {
+        valid = false;
+      }
+      if (!valid)
+        return Response.json({ error: "bad_signature", friendly: "Authorization signature didn't verify." }, { status: 401 });
     }
-    if (!valid)
-      return Response.json({ error: "bad_signature", friendly: "Authorization signature didn't verify." }, { status: 401 });
 
     const session = await createPaySession({ mainWallet, sessionAddress, cap });
     const token = await signPaySession({

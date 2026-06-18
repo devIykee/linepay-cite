@@ -6,6 +6,8 @@
  * with lib/money.ts for arithmetic.
  */
 export type UserRole = "creator" | "admin";
+/** Which wallet the active payout (`wallet_address`) points at. */
+export type WalletSource = "embedded" | "external";
 export type ContentType = "article" | "agent-skills" | "x-post";
 export type ContentStatus = "draft" | "published" | "suspended";
 export type PayerKind = "human" | "agent";
@@ -20,6 +22,11 @@ export interface User {
   avatar: string | null;
   provider: string | null;
   wallet_address: string | null;
+  /** Circle User-Controlled wallet id + EVM address (null for admins / not-yet-provisioned). */
+  embedded_wallet_id: string | null;
+  embedded_wallet_address: string | null;
+  /** Whether `wallet_address` is the embedded wallet or an externally-connected one. */
+  wallet_source: WalletSource;
   role: UserRole;
   handle: string | null;
   display_name: string | null;
@@ -81,6 +88,10 @@ export interface LedgerRow {
   payment_token: string | null;
   tx_hash: string | null;
   status: LedgerStatus;
+  /** Settlement-recovery fields (migration 0007) for retrying a stuck silent payment. */
+  attestation: string | null;
+  burn_signature: string | null;
+  mint_tx: string | null;
   created_at: Date;
   completed_at: Date | null;
 }

@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
+import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
+import { useToast } from "@/components/Toaster";
 import ContentManager from "./ContentManager";
 import EarningsPanel from "./EarningsPanel";
 
@@ -75,6 +77,19 @@ function WalletBanner({ onLinked }: { onLinked: () => void }) {
   const [busy, setBusy] = useState(false);
   const { address, isConnected } = useAccount();
   const editedRef = useRef(false); // don't clobber a manually-typed address
+  const { status: emb, busy: embBusy, provision } = useEmbeddedWallet();
+  const toast = useToast();
+  const offerEmbedded = emb?.enabled !== false && !emb?.isAdmin;
+
+  async function createFree() {
+    try {
+      await provision();
+      toast("success", "Your free wallet is ready — payouts route here automatically.");
+      onLinked();
+    } catch (e) {
+      toast("error", String((e as Error)?.message ?? e), "Couldn't create your wallet");
+    }
+  }
 
   // Auto-fill the payout address from the connected wallet (until the user
   // types their own).
@@ -102,7 +117,17 @@ function WalletBanner({ onLinked }: { onLinked: () => void }) {
 
   return (
     <div className="mb-6 rounded-lg border border-yellow-400 bg-yellow-50 px-4 py-4">
-      <div className="mb-2 font-label-lg text-yellow-900">Add your wallet to receive payments</div>
+      <div className="mb-2 font-label-lg text-yellow-900">Set up your wallet to receive payments</div>
+      {offerEmbedded && (
+        <div className="mb-3">
+          <button onClick={createFree} disabled={embBusy} className="btn-primary px-5 py-2 disabled:opacity-50">
+            {embBusy ? "Creating…" : "Create your free wallet"}
+          </button>
+          <p className="mt-1 font-body-sm text-[12px] text-yellow-800">
+            No download — secured by a PIN. Payouts route here automatically. Or paste your own address below.
+          </p>
+        </div>
+      )}
       {!isConnected && (
         <div className="mb-3">
           <ConnectButton accountStatus="address" chainStatus="none" showBalance={false} />
