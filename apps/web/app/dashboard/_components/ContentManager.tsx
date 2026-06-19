@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toaster";
+import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
 
 interface ContentRow {
   id: string;
@@ -26,6 +27,10 @@ interface Preview {
 
 export default function ContentManager({ impersonating }: { impersonating: boolean }) {
   const toast = useToast();
+  const embedded = useEmbeddedWallet();
+  // A draft saved because the creator had no wallet yet — offer to publish it
+  // once a wallet exists.
+  const [walletGatedDraft, setWalletGatedDraft] = useState<string | null>(null);
   const [list, setList] = useState<ContentRow[]>([]);
   const [title, setTitle] = useState("");
   const [contentType, setContentType] = useState<"article" | "agent-skills" | "x-post">("article");
@@ -73,7 +78,12 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         body: JSON.stringify({ body, contentType, pricePerBlock: price, title, summary, hasReferrer: true }),
       })
         .then((r) => r.json())
-        .then(setPreview)
+        // Only accept a well-formed preview. If the route returned an error
+        // payload (e.g. transient 500), keep the last good preview instead of
+        // storing `{error}` — rendering `preview.split` on that would crash.
+        .then((d) => {
+          if (d && d.split) setPreview(d);
+        })
         .catch(() => {});
     }, 400);
     return () => clearTimeout(t);
@@ -139,7 +149,15 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         body: JSON.stringify({ title, contentType, body, pricePerBlock: price, summary, tags, status, sourceUrl }),
       });
       const d = await r.json();
-      if (r.ok) {
+      if (r.ok && d.walletRequired) {
+        // Publish was downgraded to a draft because there's no payout wallet.
+        // Keep the editor cleared (the draft is saved) and prompt wallet setup.
+        setWalletGatedDraft(d.contentId ?? null);
+        setTitle(""); setBody(""); setSummary(""); setTags(""); setPreview(null);
+        setSourceUrl(null); setSourcePlatform(null); setVerify(null);
+        loadList();
+        toast("info", d.message ?? "Saved to drafts — create a wallet to publish.");
+      } else if (r.ok) {
         if (status === "published") setPublished({ readerUrl: d.readerUrl, agentUrl: d.agentUrl });
         setTitle(""); setBody(""); setSummary(""); setTags(""); setPreview(null);
         setSourceUrl(null); setSourcePlatform(null); setVerify(null);
@@ -151,6 +169,35 @@ export default function ContentManager({ impersonating }: { impersonating: boole
       } else {
         toast("error", d.message ?? d.error ?? "Publish failed");
       }
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Create the embedded wallet, then publish the gated draft. */
+  async function createWalletAndPublish() {
+    setBusy(true);
+    try {
+      await embedded.provision();
+      toast("success", "Wallet created.");
+      if (walletGatedDraft) {
+        const r = await fetch(`/api/creator/content/${walletGatedDraft}`, {
+          method: "PATCH",
+          credentials: "include",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ status: "published" }),
+        });
+        if (r.ok) {
+          setWalletGatedDraft(null);
+          loadList();
+          toast("success", "Published — it's live in the For You feed now.");
+        } else {
+          const d = await r.json().catch(() => ({}));
+          toast("error", d.message ?? d.error ?? "Wallet created, but publishing the draft failed — try Publish from the table.");
+        }
+      }
+    } catch (e) {
+      toast("error", e instanceof Error ? e.message : "Couldn't create wallet.");
     } finally {
       setBusy(false);
     }
@@ -245,7 +292,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         </div>
 
         {/* Commission split preview */}
-        {preview && (
+        {preview?.split && (
           <div className="mt-4 rounded-lg bg-surface-container-low p-4 font-data-mono text-[13px]">
             <div className="mb-2 font-label-caps text-label-caps text-on-surface-variant">Commission split</div>
             <div>Reader pays:&nbsp;&nbsp;&nbsp;&nbsp;{preview.split.readerPays} USDC per block</div>
@@ -272,6 +319,27 @@ export default function ContentManager({ impersonating }: { impersonating: boole
           <button onClick={() => publish("draft")} disabled={busy || disabled || !title || !body} className="btn-outline px-5 py-2">Save Draft</button>
           <button onClick={() => publish("published")} disabled={busy || disabled || !title || !body} className="btn-primary px-6 py-2">Publish to Feed</button>
         </div>
+
+        {/* Wallet gate: publish was saved as a draft because there's no payout wallet. */}
+        {walletGatedDraft && (
+          <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
+            <div className="mb-1 flex items-center gap-2 font-label-lg text-primary">
+              <span className="material-symbols-outlined text-[18px]">account_balance_wallet</span>
+              Saved to drafts — a wallet is needed to publish
+            </div>
+            <p className="mb-3 font-body-sm text-on-surface-variant">
+              You get paid in USDC when readers unlock your work, so publishing needs a payout wallet.
+              {embedded.status?.isAdmin
+                ? " Connect an external wallet from the account menu, then hit Publish on the draft below."
+                : " Create your free embedded wallet and we'll publish this draft right after."}
+            </p>
+            {!embedded.status?.isAdmin && (
+              <button onClick={createWalletAndPublish} disabled={busy} className="btn-primary px-5 py-2">
+                {busy ? "Setting up…" : "Create wallet & publish"}
+              </button>
+            )}
+          </div>
+        )}
 
         {showChunks && preview && (
           <div className="mt-4 flex flex-col gap-2">

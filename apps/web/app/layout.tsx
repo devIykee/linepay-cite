@@ -3,6 +3,7 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import Providers from "./providers";
 import UserMenu from "@/components/UserMenu";
+import MobileNav from "@/components/MobileNav";
 
 export const metadata: Metadata = {
   title: "LinePay Cite — get paid every time someone reads a line",
@@ -47,7 +48,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </nav>
           </header>
 
-          <main className="flex-grow">{children}</main>
+          {/* pb on mobile keeps content clear of the fixed bottom nav. */}
+          <main className="flex-grow pb-16 md:pb-0">{children}</main>
 
           <footer className="border-t border-outline-variant bg-surface-container-low">
             <div className="mx-auto flex max-w-max-width flex-col items-center justify-between gap-stack-md px-margin-mobile py-stack-lg md:flex-row md:px-margin-desktop">
@@ -62,6 +64,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
             </div>
           </footer>
+
+          <MobileNav />
         </Providers>
       </body>
     </html>

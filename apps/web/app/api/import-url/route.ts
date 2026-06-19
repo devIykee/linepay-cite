@@ -29,6 +29,63 @@ function isRawMarkdown(u: URL): boolean {
   );
 }
 
+/**
+ * Rewrite a GitHub *blob* page URL to its raw content URL. A `github.com/<o>/
+ * <r>/blob/<ref>/<path>` link serves the full HTML page (nav, sidebars, ~280 KB
+ * of chrome) — fetching that and treating it as markdown produced garbage. The
+ * raw host serves the file bytes directly. Returns the original URL untouched
+ * when it isn't a recognizable blob URL.
+ */
+function toRawGitHub(u: URL): URL {
+  const host = u.hostname.toLowerCase();
+  if (host === "github.com") {
+    // /<owner>/<repo>/blob/<ref>/<...path>
+    const m = u.pathname.match(/^\/([^/]+)\/([^/]+)\/blob\/(.+)$/);
+    if (m) {
+      const raw = new URL(`https://raw.githubusercontent.com/${m[1]}/${m[2]}/${m[3]}`);
+      raw.search = ""; // strip ?plain=1 etc.
+      return raw;
+    }
+  }
+  if (host === "gist.github.com") {
+    // /<user>/<id> → raw endpoint serves the concatenated file content.
+    const m = u.pathname.match(/^\/[^/]+\/[0-9a-f]+/i);
+    if (m) return new URL(`https://gist.githubusercontent.com${m[0]}/raw`);
+  }
+  return u;
+}
+
+/** A real browser-ish UA, and a Googlebot UA used as a fallback for bot walls. */
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36";
+const GOOGLEBOT_UA = "Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)";
+
+/**
+ * Publishers (Medium, Substack) lazy-load images: the real URL sits in
+ * `data-src` / `data-srcset` / `srcset` while `src` is a 1px placeholder or
+ * empty. Readability + Turndown only read `src`, so without this the imported
+ * markdown gets blank/placeholder images. Promote the best real URL into `src`
+ * so it survives into `![](…)`.
+ */
+function normalizeLazyImages(doc: Document): void {
+  for (const img of Array.from(doc.querySelectorAll("img"))) {
+    const pick = (val: string | null): string | null => {
+      if (!val) return null;
+      // srcset → take the first (usually largest/first candidate) URL.
+      const first = val.split(",")[0]?.trim().split(/\s+/)[0];
+      return first || null;
+    };
+    const current = img.getAttribute("src") ?? "";
+    const isPlaceholder = !current || current.startsWith("data:") || /\b1x1\b|placeholder|spacer/i.test(current);
+    if (!isPlaceholder) continue;
+    const real =
+      img.getAttribute("data-src") ||
+      pick(img.getAttribute("data-srcset")) ||
+      pick(img.getAttribute("srcset"));
+    if (real) img.setAttribute("src", real);
+  }
+}
+
 function titleFromMarkdown(md: string, fallback: string): string {
   const m = md.match(/^#\s+(.+)$/m);
   return (m?.[1] ?? fallback).trim();
@@ -49,6 +106,10 @@ interface SyndicationTweet {
   text?: string;
   user?: { name?: string; screen_name?: string };
   photos?: Array<{ url?: string }>;
+  /** Richer media list (images, video posters) — present on most modern posts. */
+  mediaDetails?: Array<{ type?: string; media_url_https?: string }>;
+  /** Long-form ("article" / >280 char) posts carry their full text here. */
+  note_tweet?: { note_tweet_results?: { result?: { text?: string } } };
   tombstone?: unknown;
 }
 
@@ -76,12 +137,24 @@ async function fetchTweet(id: string): Promise<{ ok: true; markdown: string; tit
   } catch {
     return { ok: false, reason: "x_bad_response" };
   }
-  const text = (data.text ?? "").trim();
-  if (data.tombstone || !text) return { ok: false, reason: "x_post_unavailable" };
+  // Long-form posts (X "articles" / >280 chars) put the full body in
+  // note_tweet; the top-level `text` is just a truncated preview. Prefer it.
+  const longText = data.note_tweet?.note_tweet_results?.result?.text;
+  const rawText = (longText && longText.trim()) || (data.text ?? "").trim();
+  if (data.tombstone || !rawText) return { ok: false, reason: "x_post_unavailable" };
+  // Strip the trailing t.co media shortlink X appends to the text body — the
+  // image is rendered separately below, so the bare link is just noise.
+  const text = rawText.replace(/\s*https:\/\/t\.co\/\w+\s*$/g, "").trim();
 
   const handle = data.user?.screen_name ?? null;
   const name = data.user?.name ?? handle ?? "Unknown";
-  const photos = (data.photos ?? []).map((p) => p.url).filter(Boolean) as string[];
+  // mediaDetails is the richer source (covers video posters too); fall back to
+  // photos. Dedupe and keep only image URLs.
+  const media = (data.mediaDetails ?? [])
+    .filter((m) => m.type === "photo" || !m.type)
+    .map((m) => m.media_url_https)
+    .filter(Boolean) as string[];
+  const photos = media.length ? media : ((data.photos ?? []).map((p) => p.url).filter(Boolean) as string[]);
   const md =
     `${text}\n\n` +
     photos.map((u) => `![](${u})`).join("\n\n") +
@@ -156,19 +229,41 @@ export async function POST(req: NextRequest) {
       });
     }
 
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-    let upstream: Response;
-    try {
-      upstream = await fetch(target.toString(), {
-        signal: controller.signal,
-        redirect: "follow",
-        headers: { "User-Agent": "LinePayCite-Importer/1.0 (+https://linepay.cite)" },
-      });
-    } catch {
+    // GitHub blob pages serve HTML chrome, not file content — fetch the raw URL
+    // instead. Keep the original URL for provenance (sourceUrl below).
+    const fetchTarget = toRawGitHub(target);
+
+    // Fetch with a real browser UA; if a bot wall blocks it (403, or a tiny
+    // Cloudflare interstitial), retry once as Googlebot, which Medium/Substack
+    // and most publishers allow through for SEO.
+    async function fetchOnce(ua: string): Promise<Response | null> {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+      try {
+        return await fetch(fetchTarget.toString(), {
+          signal: controller.signal,
+          redirect: "follow",
+          headers: { "User-Agent": ua },
+        });
+      } catch {
+        return null;
+      } finally {
+        clearTimeout(timer);
+      }
+    }
+
+    // Medium/Substack render almost nothing for a normal browser UA but serve
+    // the full server-rendered article to Googlebot (verified: 515 vs 198 words
+    // on a real Medium post). For those, lead with Googlebot. Everything else
+    // leads with a browser UA and falls back to Googlebot only when blocked.
+    const preferBot = source.platform === "medium" || source.platform === "substack";
+    let upstream = await fetchOnce(preferBot ? GOOGLEBOT_UA : BROWSER_UA);
+    if (!upstream || upstream.status === 403 || upstream.status === 429) {
+      const retry = await fetchOnce(preferBot ? BROWSER_UA : GOOGLEBOT_UA);
+      if (retry) upstream = retry;
+    }
+    if (!upstream) {
       return Response.json({ error: "fetch_failed" }, { status: 502 });
-    } finally {
-      clearTimeout(timer);
     }
     if (!upstream.ok) {
       return Response.json({ error: "upstream_error", status: upstream.status }, { status: 502 });
@@ -181,7 +276,7 @@ export async function POST(req: NextRequest) {
     const text = new TextDecoder().decode(buf);
 
     // Raw markdown path (.md / raw GitHub) → treat as an agent-skills doc.
-    if (isRawMarkdown(target)) {
+    if (isRawMarkdown(fetchTarget)) {
       if (text.trim().length < 40) {
         return Response.json({ error: "empty_document", message: "That file looks empty." }, { status: 422 });
       }
@@ -198,7 +293,8 @@ export async function POST(req: NextRequest) {
     }
 
     // HTML article path — Readability + Turndown.
-    const dom = new JSDOM(text, { url: target.toString() });
+    const dom = new JSDOM(text, { url: fetchTarget.toString() });
+    normalizeLazyImages(dom.window.document);
     const article = new Readability(dom.window.document).parse();
     // Reject pages that aren't real articles (login walls, link dumps, SPAs that
     // render nothing server-side, etc.) so garbage never lands in the feed.

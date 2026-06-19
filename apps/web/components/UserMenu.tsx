@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
@@ -19,6 +20,7 @@ import { useToast } from "@/components/Toaster";
 export default function UserMenu() {
   const { data: session, status } = useSession();
   const { isConnected } = useAccount();
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
@@ -80,7 +82,12 @@ export default function UserMenu() {
 
               <div className="border-t border-outline-variant py-1">
                 <MenuLink href="/dashboard" icon="dashboard" label="Creator dashboard" onClick={() => setOpen(false)} />
-                <MenuLink href="/dashboard/settings" icon="settings" label="Profile settings" onClick={() => setOpen(false)} />
+                <MenuLink
+                  href={`/dashboard/settings?returnTo=${encodeURIComponent(pathname ?? "/dashboard")}`}
+                  icon="settings"
+                  label="Profile settings"
+                  onClick={() => setOpen(false)}
+                />
                 {isAdmin && <MenuLink href="/admin" icon="shield_person" label="Admin console" onClick={() => setOpen(false)} />}
               </div>
 

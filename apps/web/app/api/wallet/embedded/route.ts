@@ -46,16 +46,25 @@ export async function POST() {
       return Response.json({ alreadyProvisioned: true, address: user.embedded_wallet_address });
     }
 
-    await ensureCircleUser(user.id);
-    const { userToken, encryptionKey } = await issueUserToken(user.id);
-    const challengeId = await createWalletChallenge(userToken);
+    try {
+      await ensureCircleUser(user.id);
+      const { userToken, encryptionKey } = await issueUserToken(user.id);
+      const challengeId = await createWalletChallenge(userToken);
 
-    return Response.json({
-      userToken,
-      encryptionKey,
-      challengeId,
-      appId: process.env.NEXT_PUBLIC_CIRCLE_APP_ID,
-    });
+      return Response.json({
+        userToken,
+        encryptionKey,
+        challengeId,
+        appId: process.env.NEXT_PUBLIC_CIRCLE_APP_ID,
+      });
+    } catch (circleErr) {
+      // Circle SDK failures (bad key, network, API outage) would otherwise fall
+      // through to a bare 500. Surface the real reason so the client/console can
+      // act on it instead of guessing.
+      const message = String((circleErr as { message?: string })?.message ?? circleErr);
+      console.error("[wallet/embedded] Circle provisioning failed:", message);
+      throw new HttpError(502, "wallet_provision_failed", `Wallet provisioning failed: ${message}`);
+    }
   } catch (e) {
     return errorResponse(e);
   }

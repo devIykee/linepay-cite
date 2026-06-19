@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useAccount } from "wagmi";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useToast } from "@/components/Toaster";
@@ -30,6 +31,14 @@ function slugifyHandle(raw: string): string {
 
 export default function ProfileSettings({ initial, impersonating }: { initial: Initial; impersonating: boolean }) {
   const toast = useToast();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  // Where to go on "back". Prefer an explicit ?returnTo=, but only honor an
+  // internal same-site path (a leading "/" that isn't "//") to avoid open
+  // redirects. Fall back to the dashboard.
+  const rawReturn = searchParams.get("returnTo");
+  const returnTo = rawReturn && /^\/(?!\/)/.test(rawReturn) ? rawReturn : "/dashboard";
+  const backLabel = returnTo === "/dashboard" ? "Dashboard" : "Back";
   const [displayName, setDisplayName] = useState(initial.displayName);
   const [handleInput, setHandleInput] = useState(initial.handle);
   const [bio, setBio] = useState(initial.bio);
@@ -65,8 +74,8 @@ export default function ProfileSettings({ initial, impersonating }: { initial: I
     <div className="mx-auto max-w-2xl">
       <div className="mb-6 flex items-center justify-between">
         <h1 className="font-display-lg text-display-lg-mobile">Profile settings</h1>
-        <Link href="/dashboard" className="font-label-caps text-label-caps text-outline hover:text-primary">
-          ← Dashboard
+        <Link href={returnTo} className="font-label-caps text-label-caps text-outline hover:text-primary">
+          ← {backLabel}
         </Link>
       </div>
 

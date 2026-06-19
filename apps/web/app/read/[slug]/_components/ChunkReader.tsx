@@ -13,6 +13,8 @@ import { buildSessionPayment } from "@/lib/session-key-client";
 import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
 import PaySetupModal, { type PaySessionInfo } from "@/components/PaySetupModal";
 import BalanceChip, { PAY_SESSION_EVENT } from "@/components/BalanceChip";
+import RichText from "@/components/RichText";
+import ShareButton from "@/components/ShareButton";
 
 const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID ?? "5042002");
 
@@ -328,7 +330,10 @@ export default function ChunkReader(props: Props) {
         <Link href="/for-you" className="inline-flex items-center gap-1 font-label-caps text-label-caps text-outline hover:text-primary">
           ← For You
         </Link>
-        {hasWallet && <BalanceChip pricePerBlock={pricePerBlock} onTopUp={() => setShowSetup(true)} />}
+        <div className="flex items-center gap-3">
+          <ShareButton slug={slug} title={title} />
+          {hasWallet && <BalanceChip pricePerBlock={pricePerBlock} onTopUp={() => setShowSetup(true)} />}
+        </div>
       </div>
 
       <div className="mb-1 flex items-center gap-2">
@@ -366,8 +371,8 @@ export default function ChunkReader(props: Props) {
           const isUnlocked = text !== undefined && text !== null;
           if (isUnlocked) {
             return (
-              <article key={c.id} className="whitespace-pre-wrap font-body-lg text-body-lg leading-relaxed text-on-surface">
-                {text}
+              <article key={c.id}>
+                <RichText source={text} />
               </article>
             );
           }

@@ -22,13 +22,38 @@ import {
 export const CIRCLE_ARC = "ARC-TESTNET";
 
 let client: CircleUserControlledWalletsClient | null = null;
+let warnedKeyShape = false;
+
+/**
+ * Circle keys generated after May 2023 have THREE colon-separated parts:
+ * `<ENV>:<id>:<secret>` (e.g. `TEST_API_KEY:abc…:def…`). A key stored without
+ * the environment prefix (just `<id>:<secret>`) makes the SDK throw a 401
+ * "malformed API key" — which surfaced as a bare 500 on /api/wallet/embedded.
+ * Normalize it here so a missing prefix doesn't take down provisioning.
+ */
+function normalizeApiKey(raw: string): string {
+  const key = raw.trim();
+  if (/^(TEST|LIVE)_API_KEY:/.test(key)) return key;
+  // Two-part `id:secret` → assume testnet and prepend the prefix.
+  if (key.split(":").length === 2) {
+    if (!warnedKeyShape) {
+      console.warn(
+        "[circle] CIRCLE_API_KEY is missing its environment prefix; assuming TEST_API_KEY:. " +
+          "Set the full 3-part key (TEST_API_KEY:id:secret) in .env and Vercel."
+      );
+      warnedKeyShape = true;
+    }
+    return `TEST_API_KEY:${key}`;
+  }
+  return key;
+}
 
 /** Lazily build the Circle client. Throws a clear error if the key is missing. */
 export function circle(): CircleUserControlledWalletsClient {
   if (client) return client;
   const apiKey = process.env.CIRCLE_API_KEY;
   if (!apiKey) throw new Error("CIRCLE_API_KEY is not set — required for embedded wallets.");
-  client = initiateUserControlledWalletsClient({ apiKey });
+  client = initiateUserControlledWalletsClient({ apiKey: normalizeApiKey(apiKey) });
   return client;
 }
 
