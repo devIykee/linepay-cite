@@ -124,7 +124,7 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
       })) as bigint;
 
       if (allowance < capWei) {
-        setStep("Approve USDC for the Gateway…");
+        setStep("Preparing your reading balance…");
         const hash = await writeContract(wagmiConfig, {
           address: usdc,
           abi: erc20Abi,
@@ -134,7 +134,7 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
         await waitForTransactionReceipt(wagmiConfig, { hash });
       }
 
-      setStep("Depositing USDC into your Gateway balance…");
+      setStep("Adding funds to your reading balance…");
       const depositHash = await writeContract(wagmiConfig, {
         address: gateway,
         abi: GATEWAY_WALLET_ABI,
@@ -144,7 +144,7 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
       await waitForTransactionReceipt(wagmiConfig, { hash: depositHash });
     }
 
-    setStep("Authorizing the session key (addDelegate)…");
+    setStep("Turning on one-tap reading…");
     const delegateHash = await writeContract(wagmiConfig, {
       address: gateway,
       abi: GATEWAY_WALLET_ABI,
@@ -177,19 +177,19 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
     // straight to addDelegate — a single PIN entry instead of three.
     const alreadyFunded = (await gatewayAvailable()) >= capWei;
     if (!alreadyFunded) {
-      setStep("Approve USDC for the Gateway (enter your PIN)…");
+      setStep("Adding funds (enter your PIN)…");
       await runEmbeddedChallenge("approve", sessionAddress);
-      setStep("Depositing USDC into your Gateway balance…");
+      setStep("Adding funds to your reading balance…");
       await runEmbeddedChallenge("deposit", sessionAddress);
     }
-    setStep("Authorizing this device (addDelegate)…");
+    setStep("Turning on one-tap reading…");
     await runEmbeddedChallenge("addDelegate", sessionAddress);
   }
 
   async function authorize() {
     const capNum = Number(cap);
     if (!Number.isFinite(capNum) || capNum <= 0) {
-      toast("warning", "Enter a deposit amount greater than 0.");
+      toast("warning", "Enter an amount greater than 0.");
       return;
     }
     setBusy(true);
@@ -197,16 +197,16 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
       const account = getOrCreateSessionAccount(mainWallet);
 
       if (LIVE) {
-        toast("info", embedded ? "One-time setup — approve each step with your PIN." : "One-time on-chain setup — approve each step in your wallet.");
+        toast("info", embedded ? "Quick one-time setup — confirm each step with your PIN." : "Quick one-time setup — confirm each step in your wallet.");
         if (embedded) await runEmbeddedSetup(account.address, parseUnits(cap, 6));
         else await runExternalSetup(account.address, parseUnits(cap, 6));
       }
 
-      setStep("Confirm authorization…");
+      setStep("Finishing setup…");
       let signature: string | undefined;
       if (!embedded) {
         const message = paySessionAuthMessage({ mainWallet, sessionAddress: account.address, cap });
-        toast("info", LIVE ? "Final step: sign to link this device." : "Sign once to authorize silent payments — no funds move.");
+        toast("info", LIVE ? "Final step: unlock one-tap reading." : "Confirm once to turn on one-tap reading — no funds move.");
         signature = await signMessageAsync({ message });
       }
 
@@ -224,12 +224,12 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.friendly ?? data.error ?? "Setup failed.");
 
-      toast("success", `Silent payments on — up to ${formatUsdc(data.cap)} USDC, no more popups.`);
+      toast("success", `You're topped up — ${formatUsdc(data.cap)} USDC of reading fuel, no more interruptions.`);
       onReady(data as PaySessionInfo);
     } catch (e) {
       const msg = String((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? e);
       if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Setup cancelled.");
-      else toast("error", msg, "Couldn't enable silent payments");
+      else toast("error", msg, "Couldn't set up reading fuel");
     } finally {
       setBusy(false);
       setStep(null);
@@ -249,14 +249,14 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
         <p className="mb-5 font-body-sm text-on-surface-variant">
           {LIVE
             ? embedded
-              ? "A quick one-time setup deposits the amount you choose into your Circle Gateway balance and authorizes this device with your PIN. After that, each block unlocks instantly — no PIN per block."
-              : "A quick one-time setup deposits the amount you choose into your Circle Gateway balance and authorizes this device. After that, each block unlocks instantly — no wallet popup per block."
-            : "Sign once to authorize this device. After that, each block unlocks instantly — no wallet popup per block."}{" "}
-          You stay in control: payments stop at your cap, and you can revoke anytime.
+              ? "A quick one-time setup adds the amount you choose to your reading balance and turns on one-tap reading with your PIN. After that, each block unlocks instantly — no PIN per block."
+              : "A quick one-time setup adds the amount you choose to your reading balance and turns on one-tap reading. After that, each block unlocks instantly — no wallet popup per block."
+            : "Confirm once to turn on one-tap reading. After that, each block unlocks instantly — no wallet popup per block."}{" "}
+          You stay in control: it stops at your cap, and you can end it anytime.
         </p>
 
         <label className="mb-1 block font-label-caps text-label-caps text-outline">
-          {LIVE ? "Amount to deposit / spend cap (USDC)" : "Spend cap (USDC)"}
+          {LIVE ? "Reading fuel to add (USDC)" : "Reading fuel cap (USDC)"}
         </label>
         <input
           type="number"
@@ -283,7 +283,7 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
             Cancel
           </button>
           <button onClick={authorize} disabled={busy} className="btn-primary flex-[2] px-4 py-2.5">
-            {busy ? "Setting up…" : LIVE ? "Set up silent payments" : "Authorize silent payments"}
+            {busy ? "Setting up…" : LIVE ? "Add reading fuel" : "Turn on one-tap reading"}
           </button>
         </div>
       </div>

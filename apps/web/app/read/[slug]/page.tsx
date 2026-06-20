@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
-import { getChunks, getContentWithCreator, incrementView } from "@/lib/store";
+import { getChapters, getChunks, getContentWithCreator, incrementView } from "@/lib/store";
 import ChunkReader from "./_components/ChunkReader";
+import BookReader from "./_components/BookReader";
 
 export const dynamic = "force-dynamic";
 
@@ -23,6 +24,27 @@ export default async function ReaderPage({ params }: { params: Promise<{ slug: s
 
   void incrementView(content.id);
   const chunks = await getChunks(content.id);
+
+  // Books open in the full-screen Moon+ reader instead of the vertical reader.
+  if (content.content_type === "book") {
+    const chapters = await getChapters(content.id);
+    return (
+      <BookReader
+        slug={content.slug}
+        title={content.title}
+        creatorHandle={content.creator_handle}
+        pricePerBlock={content.price_per_block}
+        chapters={chapters.map((ch) => ({ id: ch.id, index: ch.chapter_index, title: ch.title }))}
+        pages={chunks.map((c) => ({
+          id: c.id,
+          blockIndex: c.block_index,
+          isFree: c.is_free,
+          chapterId: c.chapter_id,
+          text: c.is_free ? c.text : null,
+        }))}
+      />
+    );
+  }
 
   return (
     <ChunkReader

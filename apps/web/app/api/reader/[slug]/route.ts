@@ -5,11 +5,13 @@ import {
   failLedgerByToken,
   finalizeLedgerByToken,
   getChunk,
+  getChunks,
   getContentWithCreator,
   getLedgerByToken,
   getUserById,
   insertLedger,
   maxBlockIndex,
+  payableChunkCount,
   recordAdminEvent,
   setLedgerAttestation,
   setLedgerMintTx,
@@ -26,7 +28,7 @@ import { splitPayment } from "@/lib/split-payment";
 import { validateWallet } from "@/lib/validate-wallet";
 import { getReferrerId } from "@/lib/referral";
 import { sendEarningNotification } from "@/lib/notify";
-import { toBaseUnits, toDecimal } from "@/lib/money";
+import { toBaseUnits, toDecimal, wholePiecePrice } from "@/lib/money";
 import { PAY_SESSION_COOKIE, verifyPaySession } from "@/lib/session-key";
 import {
   ensureRevenueSplitApproval,
@@ -58,6 +60,8 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
       signature?: Hex;
       directTx?: { hash: Hex; from?: Address };
       sessionPayment?: { burnIntent: WireBurnIntent; signature: Hex };
+      /** Whole-piece purchase: pay the discounted lump sum and unlock every block. */
+      whole?: boolean;
       /** §3 optimistic unlock: render this (non-final) block before settlement. */
       optimistic?: boolean;
       /** §3 combined check: the prior optimistic block's token to settle first. */
@@ -90,8 +94,32 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
     // The final chunk is never optimistic (spec §3.4) — it must confirm before render.
     const isFinal = blockIndex >= (await maxBlockIndex(content.id));
 
+    // Whole-piece pricing is server-authoritative: the count + discount are read
+    // from the DB here and recomputed identically on settle, so a tampered client
+    // can never underpay (the burn intent value must equal `wholeAmount`).
+    const wantsWhole = body.whole === true;
+    const wholeQuote = async () => {
+      const count = await payableChunkCount(content.id);
+      const decimal = wholePiecePrice(content.price_per_block, count);
+      return { count, decimal, wei: toBaseUnits(decimal).toString() };
+    };
+
     // ── Phase 1: quote ─────────────────────────────────────────────────────────
     if (!body.directTx && !body.sessionPayment && (!body.authorization || !body.signature)) {
+      if (wantsWhole) {
+        const w = await wholeQuote();
+        return Response.json({
+          needsPayment: true,
+          whole: true,
+          requirements: batchingRequirements(w.wei, payTo),
+          blockIndex: 0,
+          amount: w.wei,
+          amountDisplay: w.decimal,
+          chainId: arc.chainId,
+          sessionRecipient: relayerRecipient(),
+          count: w.count,
+        });
+      }
       return Response.json({
         needsPayment: true,
         requirements,
@@ -177,6 +205,101 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
       const claims = cookie ? await verifyPaySession(cookie) : null;
       if (!claims)
         return Response.json({ error: "no_pay_session", friendly: "Set up silent payments first." }, { status: 401 });
+
+      // ── Whole-piece purchase (one burn → unlock every payable block) ──────────
+      if (wantsWhole) {
+        const w = await wholeQuote();
+        const wholeWei = BigInt(w.wei);
+        const vcheck = await verifyBurnIntent(burnIntent, signature, {
+          signer: claims.sessionAddress as Address,
+          depositor: claims.mainWallet as Address,
+          value: wholeWei, // server figure — under-paying burns are rejected here
+        });
+        if (!vcheck.ok)
+          return Response.json({ error: "session_verify_failed", detail: vcheck.reason, friendly: "Couldn't verify the payment — please set up again." }, { status: 402 });
+
+        const salt = burnIntent.spec.salt;
+        const allTexts = async () => {
+          const all = await getChunks(content.id);
+          return Object.fromEntries(all.filter((c) => !c.is_free).map((c) => [c.block_index, c.text]));
+        };
+        const dup = await getLedgerByToken(salt);
+        if (dup) return Response.json({ paid: true, whole: true, alreadyUnlocked: true, texts: await allTexts(), token: salt });
+
+        const wholeSplit = splitPayment({ total: w.decimal, hasReferrer: !!referrerId });
+        const wCharge = await chargePaySession(claims.sessionId, w.decimal);
+        if (!wCharge.ok) {
+          const friendly =
+            wCharge.reason === "cap_exceeded"
+              ? "You've reached your spend cap. Add funds to unlock the whole piece."
+              : "Your payment session has ended — set it up again.";
+          return Response.json({ error: wCharge.reason, friendly }, { status: 402 });
+        }
+
+        const insertWhole = (status: "pending" | "completed") =>
+          insertLedger({
+            contentId: content.id,
+            creatorId: content.creator_id,
+            payerId: claims.mainWallet as Address,
+            payerKind: "human",
+            blockIndex: 0, // whole-piece marker (metadata.whole disambiguates)
+            grossAmount: wholeSplit.gross,
+            creatorAmount: wholeSplit.creatorAmount,
+            platformAmount: wholeSplit.platformAmount,
+            referrerAmount: wholeSplit.referrerAmount,
+            reserveAmount: wholeSplit.reserveAmount,
+            referrerId,
+            paySessionId: claims.sessionId,
+            paymentToken: salt,
+            txHash: null,
+            status,
+          });
+
+        if (!simulate) {
+          const creatorWallet = (walletCheck.checksummed ?? BURN) as Address;
+          let referrerWallet: Address | null = null;
+          if (referrerId) {
+            const refUser = await getUserById(referrerId);
+            referrerWallet = (validateWallet(refUser?.wallet_address).checksummed ?? null) as Address | null;
+          }
+          let burn: { attestation: Hex; signature: Hex };
+          try {
+            burn = await submitBurnIntent(burnIntent, signature);
+          } catch (e) {
+            await chargePaySession(claims.sessionId, `-${w.decimal}`).catch(() => undefined);
+            const detail = String((e as Error)?.message ?? e);
+            return Response.json({ error: "burn_failed", detail, friendly: friendlyError(detail) }, { status: 402 });
+          }
+          await insertWhole("pending");
+          after(async () => {
+            try {
+              await setLedgerAttestation(salt, burn.attestation, burn.signature);
+              await ensureRevenueSplitApproval();
+              const mintTx = await relayMint(burn.attestation, burn.signature);
+              await setLedgerMintTx(salt, mintTx);
+              const splitTx = await splitOnChain(creatorWallet, referrerWallet, wholeWei);
+              await finalizeLedgerByToken(salt, splitTx);
+              void sendEarningNotification({ creatorId: content.creator_id, contentTitle: content.title, blockIndex: 0, gross: wholeSplit.gross, creatorCut: wholeSplit.creatorAmount });
+            } catch (err) {
+              console.error("[reader whole settle]", String((err as Error)?.message ?? err));
+            }
+          });
+        } else {
+          await insertWhole("completed");
+          void sendEarningNotification({ creatorId: content.creator_id, contentTitle: content.title, blockIndex: 0, gross: wholeSplit.gross, creatorCut: wholeSplit.creatorAmount });
+        }
+
+        await recordAdminEvent({
+          eventType: "UNLOCK",
+          payerId: claims.mainWallet as Address,
+          contentId: content.id,
+          blockIndex: 0,
+          amountGross: wholeSplit.gross,
+          metadata: { slug: content.slug, whole: true },
+        });
+
+        return Response.json({ paid: true, whole: true, blocked: false, texts: await allTexts(), token: salt });
+      }
 
       const amountWei = BigInt(amount);
       const check = await verifyBurnIntent(burnIntent, signature, {

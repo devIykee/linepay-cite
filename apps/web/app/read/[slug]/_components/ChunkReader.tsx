@@ -9,11 +9,11 @@ import { erc20Abi } from "viem";
 import type { Address } from "viem";
 import { useToast } from "@/components/Toaster";
 import { wagmiConfig } from "@/lib/wagmi";
-import { formatUsdc } from "@/lib/money";
+import { formatUsdc, wholePiecePrice } from "@/lib/money";
 import { buildSessionPayment } from "@/lib/session-key-client";
 import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
 import PaySetupModal, { type PaySessionInfo } from "@/components/PaySetupModal";
-import BalanceChip, { PAY_SESSION_EVENT } from "@/components/BalanceChip";
+import ReadingFuel, { PAY_SESSION_EVENT } from "@/components/ReadingFuel";
 import RichText from "@/components/RichText";
 import ShareButton from "@/components/ShareButton";
 import ReportButton from "@/components/ReportButton";
@@ -93,6 +93,8 @@ export default function ChunkReader(props: Props) {
   const lastTokenRef = useRef<string | null>(null);
   const lastBlockRef = useRef<number | null>(null);
   const [blocked, setBlocked] = useState(false);
+  // Whole-piece upsell: when setup is needed first, remember to buy the lot after.
+  const [pendingWhole, setPendingWhole] = useState(false);
 
   const { address } = useAccount();
   const chainId = useChainId();
@@ -161,7 +163,9 @@ export default function ChunkReader(props: Props) {
   }, [chunks, unlocked]);
   const unlockedPayable = payable.filter((c) => unlockedChunkIds.has(c.id)).length;
   const nextLocked = payable.find((c) => !unlockedChunkIds.has(c.id));
-  const spent = (unlockedPayable * Number(pricePerBlock)).toFixed(2);
+  const allUnlocked = payable.length > 0 && unlockedPayable === payable.length;
+  // Whole-piece (discounted) total — the ONLY price shown to the reader.
+  const wholeDisplay = useMemo(() => wholePiecePrice(pricePerBlock, payable.length), [pricePerBlock, payable.length]);
 
   /** Fetch a fresh quote (price + recipient) for a block. */
   async function quoteBlock(blockIndex: number) {
@@ -209,7 +213,7 @@ export default function ChunkReader(props: Props) {
       if (d.paid && (d.text != null || d.alreadyUnlocked)) {
         persist({ ...unlocked, [blockIndex]: d.text ?? unlocked[blockIndex] ?? "" });
         window.dispatchEvent(new Event(PAY_SESSION_EVENT));
-        toast("success", `Unlocked block ${blockIndex} — silent.`);
+        toast("success", "Unlocked.");
         return { ok: true, token: typeof d.token === "string" ? d.token : undefined };
       }
       // Session ended or cap reached → fall back to setup / wallet.
@@ -261,7 +265,7 @@ export default function ChunkReader(props: Props) {
 
     let d: { paid?: boolean; text?: string; amountDisplay?: string; friendly?: string; error?: string };
     if (gatewayBalance >= amountWei) {
-      toast("info", "Sign to pay — gasless via Circle Gateway.");
+      toast("info", "Confirm to unlock — no gas fees.");
       const now = Math.floor(Date.now() / 1000);
       const validAfter = (now - 600).toString();
       const validBefore = (now + Math.max(req.maxTimeoutSeconds, 7 * 24 * 3600 + 100)).toString();
@@ -279,7 +283,7 @@ export default function ChunkReader(props: Props) {
         body: JSON.stringify({ blockIndex, authorization, signature }),
       })).json();
     } else {
-      toast("info", "Confirm the USDC payment in your wallet…");
+      toast("info", "Confirm the payment in your wallet…");
       const hash = await writeContract(wagmiConfig, {
         address: req.asset,
         abi: erc20Abi,
@@ -297,7 +301,7 @@ export default function ChunkReader(props: Props) {
 
     if (d.paid && d.text != null) {
       persist({ ...unlocked, [blockIndex]: d.text });
-      toast("success", `Unlocked block ${blockIndex}${d.amountDisplay ? ` · ${d.amountDisplay} USDC` : ""}.`);
+      toast("success", "Unlocked.");
     } else {
       throw new Error(d.friendly ?? d.error ?? "Payment could not be settled.");
     }
@@ -341,7 +345,7 @@ export default function ChunkReader(props: Props) {
           // Combined check failed — the prior payment didn't go through. Don't
           // render this block; surface a resolve state (already-shown stays).
           setBlocked(true);
-          setError("Your previous payment didn't go through. Retry, or top up your balance to continue.");
+          setError("Your previous payment didn't go through. Retry, or add funds to continue.");
           return;
         }
         if (r.ok) {
@@ -397,7 +401,7 @@ export default function ChunkReader(props: Props) {
           const r = await doSilentPay(prior, q, { optimistic: true, priorToken: null });
           if (!r.ok) {
             setBlocked(true);
-            setError("Still couldn't settle that payment — top up your balance to continue.");
+            setError("Still couldn't settle that payment — add funds to continue.");
             return;
           }
           lastTokenRef.current = r.token ?? null;
@@ -414,14 +418,95 @@ export default function ChunkReader(props: Props) {
     await unlock(currentBlock);
   }
 
+  /**
+   * Whole-piece purchase: one silent session-key payment for the discounted lot,
+   * unlocking every payable block at once. Always routes through the session
+   * (opening setup first if needed) — the price the reader sees is the only one.
+   */
+  async function doWholeSilent(): Promise<boolean> {
+    if (!effectiveWallet) return false;
+    const quote = await quoteWhole();
+    if (!quote.needsPayment) throw new Error(quote.friendly ?? quote.error ?? "Couldn't price this piece.");
+    const sessionPayment = await buildSessionPayment({
+      mainWallet: effectiveWallet,
+      recipient: quote.sessionRecipient,
+      value: BigInt(quote.requirements.amount),
+    });
+    const res = await fetch(`/api/reader/${slug}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ whole: true, sessionPayment }),
+    });
+    const d = await res.json();
+    if (d.paid && d.texts) {
+      const merged: Record<number, string> = { ...unlocked };
+      for (const [k, v] of Object.entries(d.texts as Record<string, string>)) merged[Number(k)] = v;
+      persist(merged);
+      window.dispatchEvent(new Event(PAY_SESSION_EVENT));
+      toast("success", "Unlocked the whole piece — enjoy.");
+      return true;
+    }
+    if (res.status === 401 || d.error === "no_pay_session") {
+      setSessionActive(false);
+      return false;
+    }
+    throw new Error(d.friendly ?? d.error ?? "Couldn't unlock the whole piece.");
+  }
+
+  async function quoteWhole() {
+    const res = await fetch(`/api/reader/${slug}`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ whole: true }),
+    });
+    return res.json();
+  }
+
+  async function unlockWhole(opts?: { sessionReady?: boolean }) {
+    if (!hasWallet) {
+      toast("warning", "Connect a wallet (or create your free one) to unlock this.");
+      return;
+    }
+    const hasSession = sessionActive || !!opts?.sessionReady;
+    setPaying(-1); // sentinel: whole-piece in flight (disables the per-block buttons)
+    setError(null);
+    try {
+      if (!hasSession) {
+        setPendingWhole(true);
+        setShowSetup(true);
+        return;
+      }
+      const ok = await doWholeSilent();
+      if (!ok) {
+        setPendingWhole(true);
+        setShowSetup(true);
+      }
+    } catch (e) {
+      const msg = String((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? e);
+      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Payment cancelled — nothing was charged.");
+      else {
+        setError(msg);
+        toast("error", msg, "Couldn't unlock the whole piece");
+      }
+    } finally {
+      setPaying(null);
+    }
+  }
+
   function onSessionReady(_session: PaySessionInfo) {
     setSessionActive(true);
     setShowSetup(false); // close the setup box immediately — payment is set up
     window.dispatchEvent(new Event(PAY_SESSION_EVENT));
+    // Pass sessionReady so the follow-up takes the silent path now, instead of
+    // reading the not-yet-flushed `sessionActive` and re-opening the modal.
+    if (pendingWhole) {
+      setPendingWhole(false);
+      void unlockWhole({ sessionReady: true });
+      setPendingBlock(null);
+      return;
+    }
     const blk = pendingBlock;
     setPendingBlock(null);
-    // Pass sessionReady so this unlock takes the silent path now, instead of
-    // reading the not-yet-flushed `sessionActive` and re-opening the modal.
     if (blk != null) void unlock(blk, { sessionReady: true });
   }
 
@@ -450,7 +535,7 @@ export default function ChunkReader(props: Props) {
         <div className="flex items-center gap-3">
           <ShareButton slug={slug} title={title} />
           <ReportButton contentSlug={slug} />
-          {hasWallet && <BalanceChip pricePerBlock={pricePerBlock} onTopUp={() => setShowSetup(true)} />}
+          {hasWallet && <ReadingFuel pricePerBlock={pricePerBlock} onTopUp={() => setShowSetup(true)} />}
         </div>
       </div>
 
@@ -469,19 +554,30 @@ export default function ChunkReader(props: Props) {
         )}
       </div>
       <h1 className="font-display-lg text-display-lg-mobile">{title}</h1>
-      <p className="mb-2 font-body-md text-on-surface-variant">
-        by @{creatorHandle ?? "unknown"} · {formatUsdc(pricePerBlock)} USDC/{isPicture ? "image" : "block"}
-      </p>
+      <p className="mb-2 font-body-md text-on-surface-variant">by @{creatorHandle ?? "unknown"}</p>
 
       {/* Progress */}
       <div className="mb-6 flex items-center gap-3 font-body-sm text-on-surface-variant">
-        <span>{unlockedPayable} of {payable.length} blocks unlocked</span>
-        <span>·</span>
-        <span>spent {spent} USDC</span>
+        <span>{unlockedPayable} of {payable.length} {isPicture ? "images" : "blocks"} unlocked</span>
         {sessionActive && <span className="text-secondary">· one-tap on</span>}
       </div>
 
-      {summary && <p className="mb-8 border-l-4 border-outline-variant pl-4 font-body-lg text-on-surface-variant">{summary}</p>}
+      {summary && <p className="mb-6 border-l-4 border-outline-variant pl-4 font-body-lg text-on-surface-variant">{summary}</p>}
+
+      {/* Whole-piece upsell — the single place a price is shown. Skip the bulk
+          discount math for a one-block piece (nothing to discount). */}
+      {!allUnlocked && payable.length > 1 && hasWallet && (
+        <button
+          onClick={() => unlockWhole()}
+          disabled={paying !== null}
+          className="mb-8 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-5 py-3 font-body-md text-primary transition-colors hover:bg-primary/10 disabled:opacity-60"
+        >
+          <span className="material-symbols-outlined text-[18px]">auto_stories</span>
+          {paying === -1
+            ? "Unlocking the whole piece…"
+            : `Unlock the whole ${isPicture ? "set" : "piece"} — ${formatUsdc(wholeDisplay)} USDC`}
+        </button>
+      )}
 
       <div className="flex flex-col gap-4">
         {chunks.map((c) => {
@@ -525,7 +621,7 @@ export default function ChunkReader(props: Props) {
                           disabled={paying !== null}
                           className="btn-outline px-6 py-2.5"
                         >
-                          Top up
+                          Add funds
                         </button>
                       </div>
                     </div>
@@ -598,6 +694,7 @@ export default function ChunkReader(props: Props) {
           onClose={() => {
             setShowSetup(false);
             setPendingBlock(null);
+            setPendingWhole(false);
           }}
         />
       )}

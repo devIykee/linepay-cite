@@ -12,23 +12,26 @@ interface BalanceState {
   remaining?: string;
 }
 
-/** Fired by the reader after each silent payment so the chip updates at once. */
+/** Fired by the reader after each silent payment so the gauge updates at once. */
 export const PAY_SESSION_EVENT = "skimflow:paysession";
 
 interface Props {
   /** Per-block price — used to warn when fewer than ~2 blocks remain. */
   pricePerBlock?: string;
-  /** Open the setup modal to (re)authorize / raise the cap. */
+  /** Open the setup modal to add funds / raise the cap. */
   onTopUp?: () => void;
 }
 
 /**
- * Compact nav chip showing the remaining silent-spend allowance. Polls the
- * balance endpoint, refreshes immediately on a payment event, warns once when
- * the allowance runs low, and offers revoke.
+ * "Reading Fuel" gauge — the consumer-friendly face of the silent-spend
+ * allowance. Shows a battery bar + percentage instead of a raw USDC balance;
+ * click it to reveal the exact amount. Polls the balance endpoint, refreshes on
+ * a payment event, warns once when fuel runs low, and offers to add funds / end
+ * the session. Crypto stays hidden behind the percentage.
  */
-export default function BalanceChip({ pricePerBlock, onTopUp }: Props) {
+export default function ReadingFuel({ pricePerBlock, onTopUp }: Props) {
   const [state, setState] = useState<BalanceState>({ active: false });
+  const [revealed, setRevealed] = useState(false);
   const { address } = useAccount();
   const toast = useToast();
   const warnedRef = useRef(false);
@@ -43,7 +46,7 @@ export default function BalanceChip({ pricePerBlock, onTopUp }: Props) {
         const lowAt = pricePerBlock ? Number(pricePerBlock) * 2 : 0.01;
         if (remaining <= lowAt && !warnedRef.current) {
           warnedRef.current = true;
-          toast("warning", "Silent-pay balance is running low — top up to keep reading without popups.");
+          toast("warning", "Your reading fuel is running low — add funds to keep flowing without interruptions.");
         }
         if (remaining > lowAt) warnedRef.current = false;
       }
@@ -68,7 +71,7 @@ export default function BalanceChip({ pricePerBlock, onTopUp }: Props) {
       await fetch("/api/pay-session/revoke", { method: "POST" });
       if (address) clearSessionKey(address);
       setState({ active: false });
-      toast("info", "Silent payments ended.");
+      toast("info", "Reading session ended.");
       window.dispatchEvent(new Event(PAY_SESSION_EVENT));
     } catch {
       toast("error", "Couldn't end the session.");
@@ -77,33 +80,44 @@ export default function BalanceChip({ pricePerBlock, onTopUp }: Props) {
 
   if (!state.active) return null;
 
-  // Always display 2 decimals to users; full precision stays in the backend.
+  // 2-decimal display only; full precision stays in the backend.
   const fmt = (v?: string) => (v != null ? Number(v).toFixed(2) : "0.00");
+  const cap = Number(state.cap ?? "0");
   const remaining = Number(state.remaining ?? "0");
+  const pct = cap > 0 ? Math.max(0, Math.min(100, Math.round((remaining / cap) * 100))) : 0;
   const nextBlock = pricePerBlock ? Number(pricePerBlock) : 0;
-  // Can't cover the next unlock — prompt a top-up (low-but-nonzero / depleted).
+  // Can't cover the next unlock — prompt adding funds (low-but-nonzero / depleted).
   const insufficient = nextBlock > 0 && remaining < nextBlock;
+  const tone = insufficient
+    ? "border-primary/40 bg-primary/5 text-primary"
+    : "border-secondary/30 bg-secondary/5 text-secondary";
 
   return (
-    <div
-      className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-data-mono text-[12px] ${
-        insufficient ? "border-primary/40 bg-primary/5 text-primary" : "border-secondary/30 bg-secondary/5 text-secondary"
-      }`}
-    >
-      <span className="material-symbols-outlined text-[15px]">bolt</span>
-      <span title={`Cap ${fmt(state.cap)} · spent ${fmt(state.spent)}`}>${fmt(state.remaining)} left</span>
+    <div className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 font-data-mono text-[12px] ${tone}`}>
+      {/* Battery gauge — click to reveal the exact USDC behind the percentage. */}
+      <button
+        onClick={() => setRevealed((r) => !r)}
+        className="inline-flex items-center gap-1.5"
+        title={revealed ? "Hide amount" : "Show exact balance"}
+      >
+        <span className="material-symbols-outlined text-[15px]">bolt</span>
+        <span className="relative h-2 w-9 overflow-hidden rounded-full bg-current/15" aria-hidden>
+          <span className="absolute inset-y-0 left-0 rounded-full bg-current" style={{ width: `${pct}%` }} />
+        </span>
+        <span>{revealed ? `$${fmt(state.remaining)} of $${fmt(state.cap)}` : `${pct}% fuel`}</span>
+      </button>
       {insufficient && onTopUp ? (
         <button onClick={onTopUp} className="font-label-caps text-primary hover:underline">
-          {remaining <= 0 ? "Add funds to read" : "Top up to continue"}
+          Add funds
         </button>
       ) : (
         onTopUp && (
-          <button onClick={onTopUp} className="text-primary hover:underline" title="Raise your cap">
-            top up
+          <button onClick={onTopUp} className="text-primary hover:underline" title="Add funds / raise your cap">
+            add funds
           </button>
         )
       )}
-      <button onClick={revoke} className="text-outline hover:text-on-surface" title="End silent payments">
+      <button onClick={revoke} className="text-outline hover:text-on-surface" title="End reading session">
         ✕
       </button>
     </div>

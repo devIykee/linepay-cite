@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
   const rows = await listPublished({
     contentType: type,
     // The "All" feed (no type filter) mixes human content — articles + Skim-Flow
-    // picture posts — but NOT agent skills, which live only in their own tab.
-    excludeTypes: type ? undefined : ["agent-skills"],
+    // picture posts — but NOT agent skills or books, which live in their own tabs.
+    excludeTypes: type ? undefined : ["agent-skills", "book"],
     minPrice: sp.get("minPrice") ?? undefined,
     maxPrice: sp.get("maxPrice") ?? undefined,
     sort: (sp.get("sort") as "newest" | "popular" | null) ?? undefined,
@@ -30,6 +30,7 @@ export async function GET(req: NextRequest) {
       contentType: r.content_type,
       pricePerBlock: r.price_per_block,
       blockCount: r.block_count,
+      coverImageUrl: r.cover_image_url,
       creatorHandle: r.creator_handle,
       creatorName: r.creator_name,
       creatorAvatar: r.creator_avatar,

@@ -47,10 +47,16 @@ export default function DashboardClient({ user, impersonating }: { user: User; i
             {user.handle ? `@${user.handle} · ` : ""}{user.email}
           </p>
         </div>
-        <Link href="/dashboard/settings" className="btn-outline flex shrink-0 items-center gap-1 px-4 py-2 text-label-lg">
-          <span className="material-symbols-outlined text-[18px]">settings</span>
-          <span className="hidden sm:inline">Settings</span>
-        </Link>
+        <div className="flex shrink-0 items-center gap-2">
+          <Link href="/dashboard/create-book" className="btn-primary flex items-center gap-1 px-4 py-2 text-label-lg">
+            <span className="material-symbols-outlined text-[18px]">menu_book</span>
+            <span className="hidden sm:inline">New book</span>
+          </Link>
+          <Link href="/dashboard/settings" className="btn-outline flex items-center gap-1 px-4 py-2 text-label-lg">
+            <span className="material-symbols-outlined text-[18px]">settings</span>
+            <span className="hidden sm:inline">Settings</span>
+          </Link>
+        </div>
       </header>
 
       {!walletLinked && !impersonating && <WalletBanner onLinked={() => setWalletLinked(true)} />}

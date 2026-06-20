@@ -7,6 +7,7 @@ import type {
   AdminEvent,
   AdminEventType,
   AgentSession,
+  Chapter,
   Chunk,
   Content,
   ContentStatus,
@@ -420,6 +421,82 @@ export async function createContent(input: CreateContentInput): Promise<Content>
   });
 }
 
+// ── Books (content_type='book' parent + chapters + pages-as-chunks) ──────────
+
+export interface CreateBookInput {
+  creatorId: string;
+  slug: string;
+  title: string;
+  description?: string;
+  coverImageUrl?: string | null;
+  pricePerBlock: string; // decimal USDC, per page
+  gatewayAddress?: string | null;
+  tags?: string;
+  status?: ContentStatus;
+  /** Ordered chapters; each carries its already-split pages (page text, in order). */
+  chapters: Array<{ title: string; pages: string[] }>;
+}
+
+/**
+ * Create a book atomically: the `content` parent row (content_type='book'),
+ * one `chapters` row per chapter, and one `chunks` row per page. Pages get a
+ * single global, sequential block_index across the whole book (page 0 free);
+ * each page links to its chapter via chapter_id. block_count = payable pages.
+ */
+export async function createBook(input: CreateBookInput): Promise<Content> {
+  return tx(async (client) => {
+    const totalPages = input.chapters.reduce((n, ch) => n + ch.pages.length, 0);
+    const res = await client.query<Content>(
+      `INSERT INTO content
+         (creator_id, slug, title, summary, tags, content_type, body, price_per_block,
+          cover_image_url, gateway_address, status, block_count, published_at)
+       VALUES ($1,$2,$3,$4,$5,'book','',$6,$7,$8,$9,$10,$11)
+       RETURNING *`,
+      [
+        input.creatorId,
+        input.slug,
+        input.title,
+        input.description ?? "",
+        input.tags ?? "",
+        input.pricePerBlock,
+        input.coverImageUrl ?? null,
+        input.gatewayAddress ?? null,
+        input.status ?? "draft",
+        Math.max(0, totalPages - 1), // payable pages (page 0 is the free preview)
+        input.status === "published" ? new Date() : null,
+      ]
+    );
+    const content = res.rows[0];
+
+    let blockIndex = 0;
+    for (let ci = 0; ci < input.chapters.length; ci++) {
+      const ch = input.chapters[ci];
+      const chapterRow = await client.query<{ id: string }>(
+        `INSERT INTO chapters (content_id, chapter_index, title) VALUES ($1,$2,$3) RETURNING id`,
+        [content.id, ci, ch.title]
+      );
+      const chapterId = chapterRow.rows[0].id;
+      for (const page of ch.pages) {
+        await client.query(
+          `INSERT INTO chunks (content_id, block_index, text, is_free, chapter_id)
+           VALUES ($1,$2,$3,$4,$5)`,
+          [content.id, blockIndex, page, blockIndex === 0, chapterId]
+        );
+        blockIndex++;
+      }
+    }
+    return content;
+  });
+}
+
+/** Ordered chapters of a book, by chapter_index. */
+export function getChapters(contentId: string): Promise<Chapter[]> {
+  return query<Chapter>(
+    `SELECT * FROM chapters WHERE content_id = $1 ORDER BY chapter_index ASC`,
+    [contentId]
+  );
+}
+
 export function getContentBySlug(slug: string): Promise<Content | undefined> {
   return queryOne<Content>(`SELECT * FROM content WHERE slug = $1`, [slug]);
 }
@@ -438,6 +515,14 @@ export function getChunk(contentId: string, blockIndex: number): Promise<Chunk |
     `SELECT * FROM chunks WHERE content_id = $1 AND block_index = $2`,
     [contentId, blockIndex]
   );
+}
+
+/** Number of payable (non-free) chunks — used for whole-piece pricing. */
+export function payableChunkCount(contentId: string): Promise<number> {
+  return queryOne<{ n: string }>(
+    `SELECT COUNT(*)::int AS n FROM chunks WHERE content_id = $1 AND is_free = FALSE`,
+    [contentId]
+  ).then((r) => Number(r?.n ?? 0));
 }
 
 /** Highest block_index for a piece — used to detect the final (never-optimistic) chunk. */

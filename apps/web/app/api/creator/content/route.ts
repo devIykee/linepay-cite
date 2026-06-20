@@ -5,12 +5,13 @@ import {
   resolveActingUser,
 } from "@/lib/session";
 import {
+  createBook,
   createContent,
   creatorPublishedCount,
   listContentByCreator,
   recordAdminEvent,
 } from "@/lib/store";
-import { chunkContent } from "@/lib/chunk-content";
+import { chunkContent, splitPages } from "@/lib/chunk-content";
 import { validateArticleChunks, hasBlockingErrors } from "@/lib/chunk-validate";
 import { normalizeImageUrl, isLikelyImageUrl, MAX_SKIMFLOW_IMAGES, MAX_CAPTION_CHARS } from "@/lib/image-links";
 import { normalizeUsdc } from "@/lib/money";
@@ -53,6 +54,9 @@ export async function POST(req: NextRequest) {
       contentType?: ContentType;
       body?: string;
       images?: Array<{ url?: string; caption?: string }>;
+      /** Book (content_type='book') fields. */
+      coverImageUrl?: string;
+      chapters?: Array<{ title?: string; body?: string }>;
       pricePerBlock?: string | number;
       summary?: string;
       tags?: string;
@@ -62,13 +66,81 @@ export async function POST(req: NextRequest) {
 
     if (!body.title?.trim()) return Response.json({ error: "missing_title" }, { status: 400 });
     const contentType: ContentType =
-      body.contentType === "agent-skills" ? "agent-skills" : body.contentType === "picture" ? "picture" : "article";
+      body.contentType === "agent-skills"
+        ? "agent-skills"
+        : body.contentType === "picture"
+          ? "picture"
+          : body.contentType === "book"
+            ? "book"
+            : "article";
 
     let pricePerBlock: string;
     try {
       pricePerBlock = normalizeUsdc(body.pricePerBlock ?? "0");
     } catch {
       return Response.json({ error: "invalid_price" }, { status: 400 });
+    }
+
+    const gatewayAddressDefault =
+      process.env.CIRCLE_GATEWAY_ADDRESS ||
+      process.env.GATEWAY_WALLET_ADDRESS ||
+      "0x0077777d7EBA4688BDeF3E311b846F25870A19B9";
+
+    // ── Books: parent content row + chapters + pages-as-chunks ──────────────────
+    if (contentType === "book") {
+      const coverImageUrl = body.coverImageUrl ? normalizeImageUrl(String(body.coverImageUrl)) : null;
+      if (coverImageUrl && !isLikelyImageUrl(coverImageUrl))
+        return Response.json({ error: "invalid_cover", message: "The cover image link isn't a valid URL." }, { status: 400 });
+
+      const rawChapters = Array.isArray(body.chapters) ? body.chapters : [];
+      const chapters = rawChapters
+        .map((ch, i) => ({ title: String(ch.title ?? `Chapter ${i + 1}`).slice(0, 200), pages: splitPages(String(ch.body ?? "")) }))
+        .filter((ch) => ch.pages.length > 0);
+      if (chapters.length === 0)
+        return Response.json({ error: "no_chapters", message: "Add at least one chapter with some text." }, { status: 400 });
+      const totalPages = chapters.reduce((n, ch) => n + ch.pages.length, 0);
+      if (totalPages < 2)
+        return Response.json(
+          { error: "too_short", message: "A book needs at least 2 pages — the first is a free preview. Add more text or a `---` page break." },
+          { status: 400 }
+        );
+
+      const requestedStatus = body.status === "published" ? "published" : "draft";
+      const hasWallet = !!user.wallet_address || !!user.embedded_wallet_address;
+      const walletGated = requestedStatus === "published" && !hasWallet;
+      const status = walletGated ? "draft" : requestedStatus;
+      const isFirstPublish = status === "published" && (await creatorPublishedCount(user.id)) === 0;
+
+      const content = await createBook({
+        creatorId: user.id,
+        slug: slugify(body.title),
+        title: body.title.trim(),
+        description: body.summary ?? "",
+        coverImageUrl,
+        pricePerBlock,
+        gatewayAddress: gatewayAddressDefault,
+        tags: body.tags ?? "",
+        status,
+        chapters,
+      });
+
+      const readerUrl = `${appUrl(req)}/read/${content.slug}`;
+      if (status === "published") {
+        await recordAdminEvent({
+          eventType: "PUBLISH",
+          actorId: user.id,
+          contentId: content.id,
+          metadata: { title: content.title, slug: content.slug, type: "book" },
+        });
+        if (isFirstPublish && user.email)
+          notifyFirstPublish({ to: user.email, name: user.display_name ?? undefined, title: content.title, readerUrl });
+      }
+      if (walletGated)
+        return Response.json(
+          { content, readerUrl, walletRequired: true, draftSaved: true, contentId: content.id, message: "Saved to drafts — create a payout wallet to publish and start earning." },
+          { status: 200 }
+        );
+      return Response.json({ content, readerUrl });
     }
 
     // Build the chunks to store, per content type.

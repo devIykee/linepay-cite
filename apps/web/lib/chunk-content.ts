@@ -80,6 +80,20 @@ export function chunkContent({ content, format }: ChunkInput): Chunk[] {
 const isHeading = (p: string): boolean => /^#{1,6}\s/.test(p.trim());
 
 /**
+ * Split a book chapter's body into PAGES on an explicit page-break — a line
+ * containing only `---` (a markdown horizontal rule). Each page becomes one
+ * payable screen in the Moon+ reader. With no `---`, the whole chapter is one
+ * page. Empty pages are dropped; a chapter with only whitespace yields none.
+ */
+export function splitPages(body: string): string[] {
+  return (body ?? "")
+    .replace(/\r\n/g, "\n")
+    .split(/\n[ \t]*-{3,}[ \t]*\n/)
+    .map((p) => p.trim())
+    .filter((p) => p.length > 0);
+}
+
+/**
  * Rewrite an article body so blank-line-delimited blocks are sensible chunks.
  * Returns the regrouped body text (chunks separated by a blank line).
  */

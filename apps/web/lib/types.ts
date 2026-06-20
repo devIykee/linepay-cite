@@ -8,7 +8,7 @@
 export type UserRole = "creator" | "admin";
 /** Which wallet the active payout (`wallet_address`) points at. */
 export type WalletSource = "embedded" | "external";
-export type ContentType = "article" | "agent-skills" | "picture";
+export type ContentType = "article" | "agent-skills" | "picture" | "book";
 export type ContentStatus = "draft" | "published" | "suspended";
 export type PayerKind = "human" | "agent";
 export type LedgerStatus = "pending" | "completed" | "failed";
@@ -50,7 +50,9 @@ export interface Content {
   tags: string;
   content_type: ContentType;
   body: string;
-  price_per_block: string; // decimal USDC
+  price_per_block: string; // decimal USDC (for books: price per page)
+  /** Book cover image (book content_type only; migration 0011). */
+  cover_image_url: string | null;
   gateway_address: string | null;
   status: ContentStatus;
   suspended_reason: string | null;
@@ -75,6 +77,18 @@ export interface Chunk {
    * optional caption. null for text/agent-skills chunks. */
   image_url: string | null;
   caption: string | null;
+  /** Book pages only (migration 0011): the chapter this page belongs to. null
+   * for article/agent-skills/picture chunks. */
+  chapter_id: string | null;
+}
+
+/** A chapter groups ordered pages (chunks) within a book (migration 0011). */
+export interface Chapter {
+  id: string;
+  content_id: string;
+  chapter_index: number;
+  title: string;
+  created_at: Date;
 }
 
 export interface LedgerRow {

@@ -19,6 +19,7 @@ interface FeedItem {
   contentType: string;
   pricePerBlock: string;
   blockCount?: number;
+  coverImageUrl?: string | null;
   creatorHandle: string | null;
   creatorName: string | null;
   creatorAvatar?: string | null;
@@ -29,17 +30,19 @@ interface FeedItem {
   agentUrl?: string | null;
 }
 
-type TabKey = "all" | "article" | "agent-skills" | "picture";
+type TabKey = "all" | "article" | "book" | "agent-skills" | "picture";
 
 const TABS: { key: TabKey; label: string }[] = [
   { key: "all", label: "All" },
   { key: "article", label: "Articles" },
+  { key: "book", label: "Books" },
   { key: "picture", label: "Skim-Flow" },
   { key: "agent-skills", label: "Agent Skills" },
 ];
 
 const TYPE_LABEL: Record<string, string> = {
   article: "Article",
+  book: "Book",
   "agent-skills": "Agent Skills",
   picture: "Skim-Flow",
 };
@@ -123,8 +126,10 @@ export default function ForYouPage() {
         let rows = raw;
         if (searching) {
           // Search hits all types; keep the active tab's content. "All" mixes
-          // human content (articles + posts) but never agent skills.
-          rows = rows.filter((r) => (tab === "all" ? r.contentType !== "agent-skills" : r.contentType === tab));
+          // human content (articles + posts) but never agent skills or books.
+          rows = rows.filter((r) =>
+            tab === "all" ? r.contentType !== "agent-skills" && r.contentType !== "book" : r.contentType === tab
+          );
         }
         if (verifiedOnly && !searching) rows = rows.filter((r) => r.creatorVerified);
 
@@ -229,9 +234,18 @@ export default function ForYouPage() {
         )}
       </div>
 
-      {/* Feed */}
-      <div className="grid grid-cols-1 gap-gutter md:grid-cols-2">
-        {items.map((c) => (
+      {/* Feed — Books render as a denser cover grid; everything else as cards. */}
+      <div
+        className={
+          tab === "book"
+            ? "grid grid-cols-2 gap-gutter sm:grid-cols-3 md:grid-cols-4"
+            : "grid grid-cols-1 gap-gutter md:grid-cols-2"
+        }
+      >
+        {items.map((c) =>
+          c.contentType === "book" ? (
+            <BookCard key={c.id} c={c} />
+          ) : (
           <Link
             key={c.id}
             href={c.url}
@@ -291,7 +305,8 @@ export default function ForYouPage() {
               </div>
             </div>
           </Link>
-        ))}
+          )
+        )}
       </div>
 
       {/* States */}
@@ -309,6 +324,33 @@ export default function ForYouPage() {
         <p className="mt-6 text-center font-body-sm text-outline">You&apos;re all caught up.</p>
       )}
     </div>
+  );
+}
+
+/** Cover-forward card for the Books tab — cover image, title, author, synopsis. */
+function BookCard({ c }: { c: FeedItem }) {
+  return (
+    <Link href={c.url} className="group flex flex-col text-left">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-xl border border-outline-variant bg-surface-container-low editorial-shadow">
+        {c.coverImageUrl ? (
+          // eslint-disable-next-line @next/next/no-img-element
+          <img
+            src={c.coverImageUrl}
+            alt={c.title}
+            className="h-full w-full object-cover transition-transform group-hover:scale-[1.02]"
+          />
+        ) : (
+          <div className="flex h-full w-full flex-col items-center justify-center gap-2 p-4 text-center">
+            <span className="material-symbols-outlined text-[28px] text-outline">menu_book</span>
+            <span className="line-clamp-3 font-headline-sm text-[15px] leading-tight">{c.title}</span>
+          </div>
+        )}
+        <span className="absolute left-2 top-2 pill bg-surface/80 backdrop-blur">Book</span>
+      </div>
+      <h3 className="mt-2 line-clamp-2 font-headline-sm text-[15px] leading-tight group-hover:text-primary">{c.title}</h3>
+      <span className="truncate font-data-mono text-[11px] text-outline">@{c.creatorHandle ?? "unknown"}</span>
+      {c.summary && <p className="mt-1 line-clamp-2 font-body-sm text-[12px] text-on-surface-variant">{c.summary}</p>}
+    </Link>
   );
 }
 
@@ -355,6 +397,17 @@ function EmptyState({ tab, q }: { tab: TabKey; q: string }) {
       <div className="mt-2 rounded-xl border border-outline-variant bg-surface-container-lowest p-8 text-center">
         <p className="font-body-md text-on-surface-variant">
           No results for <span className="font-data-mono text-on-surface">“{q}”</span>.
+        </p>
+      </div>
+    );
+  }
+  if (tab === "book") {
+    return (
+      <div className="mt-2 flex flex-col items-center gap-2 rounded-xl border border-dashed border-outline-variant bg-surface-container-lowest p-10 text-center">
+        <span className="material-symbols-outlined text-[28px] text-primary">menu_book</span>
+        <h3 className="font-headline-sm text-headline-sm">No books yet</h3>
+        <p className="max-w-md font-body-sm text-body-sm text-on-surface-variant">
+          Long-form, serialized reads — pay as you turn the page. Creators can publish one from the dashboard.
         </p>
       </div>
     );

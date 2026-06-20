@@ -59,6 +59,28 @@ export function sumDecimal(values: ReadonlyArray<string | number | bigint>): str
   return toDecimal(total);
 }
 
+/**
+ * Whole-piece ("buy the lot") price: the sum of every payable block at
+ * `pricePerBlock`, minus a bulk discount (default 5%). All arithmetic is in base
+ * units (no floats); the discount rounds DOWN (floor) so the reader is never
+ * over-charged by a rounding cent. Returns a decimal USDC string.
+ *
+ * The display value is computed client-side; the reader API recomputes this
+ * server-side at settle time so a tampered client can't underpay (the burn
+ * intent's value must equal the server's figure).
+ */
+export function wholePiecePrice(
+  pricePerBlock: string | number,
+  count: number,
+  discountPct = 5
+): string {
+  const n = Math.max(0, Math.floor(count));
+  const gross = toBaseUnits(pricePerBlock) * BigInt(n);
+  const pct = BigInt(Math.max(0, Math.min(100, Math.round(discountPct))));
+  const discounted = gross - (gross * pct) / 100n; // integer floor division
+  return toDecimal(discounted < 0n ? 0n : discounted);
+}
+
 /** Truncate/round a numeric USDC string to 6 decimals (DB-safe). */
 export function normalizeUsdc(usdc: string | number): string {
   return toDecimal(toBaseUnits(usdc));
