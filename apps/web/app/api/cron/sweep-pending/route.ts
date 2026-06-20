@@ -1,5 +1,5 @@
 import { NextRequest } from "next/server";
-import { listPendingLedger, recordAdminEvent } from "@/lib/store";
+import { listPendingLedger, recordAdminEvent, finalizeLedgerByToken } from "@/lib/store";
 import { settlePendingByToken } from "@/lib/settle";
 
 export const runtime = "nodejs";
@@ -15,9 +15,18 @@ export const maxDuration = 300;
 const SWEEP_IDLE_MS = 2 * 60 * 60 * 1000; // 2 hours
 
 /**
- * GET /api/cron/sweep-pending — invoked by Vercel Cron (see vercel.json) every
- * ~30 minutes. Guarded by CRON_SECRET (Vercel sends it as a Bearer token); a
- * manual call may pass ?key=<CRON_SECRET>.
+ * GET /api/cron/sweep-pending — settles abandoned optimistic/pending rows.
+ *
+ * Scheduling: vercel.json runs this once daily (Vercel Hobby caps crons at
+ * once/day). For tighter intervals, point an EXTERNAL scheduler (GitHub Actions
+ * cron, cron-job.org, Upstash QStash, etc.) at this endpoint on whatever
+ * interval you want — no Vercel plan limit applies. Either way it's guarded by
+ * CRON_SECRET: Vercel sends it as `Authorization: Bearer <CRON_SECRET>`; an
+ * external caller can pass it as a Bearer header or ?key=<CRON_SECRET>.
+ *
+ * The daily cadence only affects how fast a TRULY abandoned session is cleaned
+ * up — the per-tap N+1 combined check and the final-chunk-always-confirmed rule
+ * still prevent unpaid reads in the meantime.
  */
 export async function GET(req: NextRequest) {
   const secret = process.env.CRON_SECRET;
@@ -29,6 +38,7 @@ export async function GET(req: NextRequest) {
     }
   }
 
+  const simulate = (process.env.PAYMENTS_MODE ?? "simulate").toLowerCase() !== "live";
   const pending = await listPendingLedger(200);
   const cutoff = Date.now() - SWEEP_IDLE_MS;
   const stale = pending.filter((r) => r.payment_token && new Date(r.created_at).getTime() < cutoff);
@@ -38,6 +48,19 @@ export async function GET(req: NextRequest) {
   for (const row of stale) {
     const token = row.payment_token!;
     try {
+      // Abandoned optimistic rows with no committed burn (simulate only) carry
+      // their per-chunk split already — just finalize. Live rows always have an
+      // attestation and go through the mint→split retry below.
+      if (row.optimistic && !row.attestation) {
+        if (simulate) {
+          await finalizeLedgerByToken(token);
+          settled++;
+          results.push({ token, ok: true });
+        } else {
+          results.push({ token, ok: false, reason: "no_attestation" });
+        }
+        continue;
+      }
       const r = await settlePendingByToken(token);
       if (r.ok) settled++;
       results.push({ token, ok: r.ok, reason: r.reason });

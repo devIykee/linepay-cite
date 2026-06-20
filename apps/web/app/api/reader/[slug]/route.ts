@@ -2,16 +2,19 @@ import { NextRequest, after } from "next/server";
 import { cookies } from "next/headers";
 import {
   chargePaySession,
+  failLedgerByToken,
   finalizeLedgerByToken,
   getChunk,
   getContentWithCreator,
   getLedgerByToken,
   getUserById,
   insertLedger,
+  maxBlockIndex,
   recordAdminEvent,
   setLedgerAttestation,
   setLedgerMintTx,
 } from "@/lib/store";
+import { settlePendingByToken } from "@/lib/settle";
 import {
   arc,
   batchingRequirements,
@@ -55,6 +58,12 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
       signature?: Hex;
       directTx?: { hash: Hex; from?: Address };
       sessionPayment?: { burnIntent: WireBurnIntent; signature: Hex };
+      /** §3 optimistic unlock: render this (non-final) block before settlement. */
+      optimistic?: boolean;
+      /** §3 combined check: the prior optimistic block's token to settle first. */
+      priorToken?: string;
+      /** Simulate-only test hook: force this block's payment to fail. */
+      simulateFail?: boolean;
     };
     const blockIndex = Math.max(0, Number(body.blockIndex ?? 0));
 
@@ -77,6 +86,9 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
     const amount = toBaseUnits(content.price_per_block).toString();
     const requirements = batchingRequirements(amount, payTo);
     const simulate = (process.env.PAYMENTS_MODE ?? "simulate").toLowerCase() !== "live";
+    const optimisticEnabled = (process.env.OPTIMISTIC_UNLOCK_ENABLED ?? "false").toLowerCase() === "true";
+    // The final chunk is never optimistic (spec §3.4) — it must confirm before render.
+    const isFinal = blockIndex >= (await maxBlockIndex(content.id));
 
     // ── Phase 1: quote ─────────────────────────────────────────────────────────
     if (!body.directTx && !body.sessionPayment && (!body.authorization || !body.signature)) {
@@ -90,6 +102,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
         // Recipient for the session-key (silent) path: the relayer mints + routes
         // to RevenueSplit on-chain. The browser builds its burn intent toward this.
         sessionRecipient: relayerRecipient(),
+        // §3: tell the client whether to render this block optimistically. The
+        // final chunk is excluded so the client confirms payment before showing it.
+        optimistic: optimisticEnabled && !isFinal,
+        isFinal,
       });
     }
 
@@ -175,6 +191,123 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
       const salt = burnIntent.spec.salt;
       const dup = await getLedgerByToken(salt);
       if (dup) return Response.json({ paid: true, alreadyUnlocked: true, blockIndex, text: chunk.text, txHash: salt });
+
+      // ── §3 Optimistic unlock (non-final blocks; flag on) ────────────────────
+      // Render N now, settle in the background. The N+1 request carries
+      // `priorToken`; we settle/verify the prior block first (the combined
+      // check) and block this unlock if the prior payment failed.
+      if (optimisticEnabled && body.optimistic && !isFinal) {
+        if (body.priorToken) {
+          const prior = await getLedgerByToken(body.priorToken);
+          if (prior && prior.status === "failed") {
+            return Response.json(
+              { blocked: true, error: "prior_unsettled", friendly: "Your previous payment didn't go through. Retry or top up to continue." },
+              { status: 402 }
+            );
+          }
+          if (prior && prior.status === "pending") {
+            if (simulate) {
+              // Optimistic simulate rows already carry the per-chunk split — just finalize.
+              await finalizeLedgerByToken(body.priorToken);
+            } else if (prior.attestation) {
+              // Live: the burn committed (money moved); finish mint→split in the
+              // background and treat the prior as settled for the gate.
+              after(() => settlePendingByToken(body.priorToken!).catch(() => undefined));
+            } else {
+              // Live pending with no committed burn → unsafe; fail it and block.
+              await failLedgerByToken(body.priorToken);
+              return Response.json(
+                { blocked: true, error: "prior_unsettled", friendly: "Your previous payment didn't go through. Retry or top up to continue." },
+                { status: 402 }
+              );
+            }
+          }
+        }
+
+        // Charge the cap for THIS block (atomic double-spend guard).
+        const oCharge = await chargePaySession(claims.sessionId, content.price_per_block);
+        if (!oCharge.ok) {
+          const friendly =
+            oCharge.reason === "cap_exceeded"
+              ? "You've reached your silent-spend cap. Top up to keep reading."
+              : "Your silent-payment session has ended — set it up again.";
+          return Response.json({ error: oCharge.reason, friendly }, { status: 402 });
+        }
+
+        // Record a pending + optimistic row (per-chunk split already attached) and
+        // return the text immediately — the reader renders before settlement.
+        await insertLedger({
+          contentId: content.id,
+          creatorId: content.creator_id,
+          payerId: claims.mainWallet as Address,
+          payerKind: "human",
+          blockIndex,
+          grossAmount: split.gross,
+          creatorAmount: split.creatorAmount,
+          platformAmount: split.platformAmount,
+          referrerAmount: split.referrerAmount,
+          reserveAmount: split.reserveAmount,
+          referrerId,
+          paySessionId: claims.sessionId,
+          paymentToken: salt,
+          txHash: null,
+          status: "pending",
+          optimistic: true,
+        });
+        await recordAdminEvent({
+          eventType: "UNLOCK",
+          payerId: claims.mainWallet as Address,
+          contentId: content.id,
+          blockIndex,
+          amountGross: split.gross,
+          metadata: { slug: content.slug, optimistic: true },
+        });
+
+        if (simulate && body.simulateFail) {
+          // Test hook: force this block to fail so the next combined check blocks.
+          await failLedgerByToken(salt);
+          await chargePaySession(claims.sessionId, `-${content.price_per_block}`).catch(() => undefined);
+        } else if (!simulate) {
+          // Live: commit the burn (money moves) before showing, then mint→split
+          // in the background. On burn failure, mark failed + refund the cap.
+          const creatorWallet = (walletCheck.checksummed ?? BURN) as Address;
+          let referrerWallet: Address | null = null;
+          if (referrerId) {
+            const refUser = await getUserById(referrerId);
+            referrerWallet = (validateWallet(refUser?.wallet_address).checksummed ?? null) as Address | null;
+          }
+          let burn: { attestation: Hex; signature: Hex };
+          try {
+            burn = await submitBurnIntent(burnIntent, signature);
+          } catch (e) {
+            await failLedgerByToken(salt);
+            await chargePaySession(claims.sessionId, `-${content.price_per_block}`).catch(() => undefined);
+            const detail = String((e as Error)?.message ?? e);
+            return Response.json({ error: "burn_failed", detail, friendly: friendlyError(detail) }, { status: 402 });
+          }
+          after(async () => {
+            try {
+              await setLedgerAttestation(salt, burn.attestation, burn.signature);
+              await ensureRevenueSplitApproval();
+              const mintTx = await relayMint(burn.attestation, burn.signature);
+              await setLedgerMintTx(salt, mintTx);
+              const splitTx = await splitOnChain(creatorWallet, referrerWallet, amountWei);
+              await finalizeLedgerByToken(salt, splitTx);
+              void sendEarningNotification({
+                creatorId: content.creator_id,
+                contentTitle: content.title,
+                blockIndex,
+                gross: split.gross,
+                creatorCut: split.creatorAmount,
+              });
+            } catch (err) {
+              console.error("[reader optimistic settle]", String((err as Error)?.message ?? err));
+            }
+          });
+        }
+
+        return Response.json({ paid: true, optimistic: true, blocked: false, blockIndex, text: chunk.text, token: salt });
+      }
 
       // Atomically charge the cap (the concurrency guard for double-spends).
       const charge = await chargePaySession(claims.sessionId, content.price_per_block);

@@ -440,6 +440,14 @@ export function getChunk(contentId: string, blockIndex: number): Promise<Chunk |
   );
 }
 
+/** Highest block_index for a piece — used to detect the final (never-optimistic) chunk. */
+export function maxBlockIndex(contentId: string): Promise<number> {
+  return queryOne<{ max: number | null }>(
+    `SELECT MAX(block_index) AS max FROM chunks WHERE content_id = $1`,
+    [contentId]
+  ).then((r) => (r?.max == null ? 0 : Number(r.max)));
+}
+
 export interface ContentWithCreator extends Content {
   creator_handle: string | null;
   creator_name: string | null;
@@ -647,6 +655,8 @@ export interface InsertLedgerInput {
   paymentToken?: string | null;
   txHash?: string | null;
   status: LedgerStatus;
+  /** Reader was shown the chunk before payment confirmed (optimistic unlock, §3). */
+  optimistic?: boolean;
 }
 
 /**
@@ -659,8 +669,8 @@ export async function insertLedger(input: InsertLedgerInput): Promise<LedgerRow>
     `INSERT INTO payment_ledger
        (content_id, creator_id, payer_id, payer_kind, block_index, gross_amount,
         creator_amount, platform_amount, referrer_amount, reserve_amount, referrer_id,
-        pay_session_id, payment_token, tx_hash, status, completed_at)
-     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+        pay_session_id, payment_token, tx_hash, status, optimistic, completed_at)
+     VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
      ON CONFLICT (payment_token) WHERE payment_token IS NOT NULL DO NOTHING
      RETURNING *`,
     [
@@ -679,6 +689,7 @@ export async function insertLedger(input: InsertLedgerInput): Promise<LedgerRow>
       input.paymentToken ?? null,
       input.txHash ?? null,
       input.status,
+      input.optimistic ?? false,
       completedAt,
     ]
   );

@@ -98,6 +98,8 @@ export interface LedgerRow {
   attestation: string | null;
   burn_signature: string | null;
   mint_tx: string | null;
+  /** True when the reader was shown the chunk before payment confirmed (§3, migration 0010). */
+  optimistic: boolean;
   created_at: Date;
   completed_at: Date | null;
 }

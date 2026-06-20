@@ -3,7 +3,7 @@
   "crons": [
     {
       "path": "/api/cron/sweep-pending",
-      "schedule": "13,43 * * * *"
+      "schedule": "23 4 * * *"
     }
   ]
 }

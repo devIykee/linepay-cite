@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useChainId, useSignTypedData, useSwitchChain } from "wagmi";
@@ -87,6 +87,12 @@ export default function ChunkReader(props: Props) {
   const [sessionActive, setSessionActive] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
   const [pendingBlock, setPendingBlock] = useState<number | null>(null);
+  // §3 optimistic unlock: the last optimistically-unlocked block's payment token
+  // (settled on the next unlock's combined check), and whether a combined check
+  // failed (blocks further unlocking until resolved).
+  const lastTokenRef = useRef<string | null>(null);
+  const lastBlockRef = useRef<number | null>(null);
+  const [blocked, setBlocked] = useState(false);
 
   const { address } = useAccount();
   const chainId = useChainId();
@@ -167,10 +173,19 @@ export default function ChunkReader(props: Props) {
     return res.json();
   }
 
-  /** Silent path: sign a burn intent with the local session key (no popup). */
+  /**
+   * Silent path: sign a burn intent with the local session key (no popup).
+   * With `opts.optimistic`, the server renders this (non-final) block before
+   * settlement and runs the combined check against `opts.priorToken`. Returns a
+   * tagged result: `blocked` means the prior payment failed (don't render).
+   */
   const doSilentPay = useCallback(
-    async (blockIndex: number, quote: { requirements: { amount: string }; sessionRecipient: Address }) => {
-      if (!effectiveWallet) return false;
+    async (
+      blockIndex: number,
+      quote: { requirements: { amount: string }; sessionRecipient: Address },
+      opts?: { optimistic?: boolean; priorToken?: string | null; simulateFail?: boolean }
+    ): Promise<{ ok: boolean; blocked?: boolean; token?: string }> => {
+      if (!effectiveWallet) return { ok: false };
       const value = BigInt(quote.requirements.amount);
       const sessionPayment = await buildSessionPayment({
         mainWallet: effectiveWallet,
@@ -180,19 +195,27 @@ export default function ChunkReader(props: Props) {
       const res = await fetch(`/api/reader/${slug}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ blockIndex, sessionPayment }),
+        body: JSON.stringify({
+          blockIndex,
+          sessionPayment,
+          ...(opts?.optimistic
+            ? { optimistic: true, priorToken: opts.priorToken ?? undefined, simulateFail: opts.simulateFail || undefined }
+            : {}),
+        }),
       });
       const d = await res.json();
+      // Combined check failed (the prior block's payment didn't go through).
+      if (d.blocked) return { ok: false, blocked: true };
       if (d.paid && (d.text != null || d.alreadyUnlocked)) {
         persist({ ...unlocked, [blockIndex]: d.text ?? unlocked[blockIndex] ?? "" });
         window.dispatchEvent(new Event(PAY_SESSION_EVENT));
         toast("success", `Unlocked block ${blockIndex} — silent.`);
-        return true;
+        return { ok: true, token: typeof d.token === "string" ? d.token : undefined };
       }
       // Session ended or cap reached → fall back to setup / wallet.
       if (res.status === 401 || d.error === "no_pay_session") {
         setSessionActive(false);
-        return false;
+        return { ok: false };
       }
       throw new Error(d.friendly ?? d.error ?? "Silent payment failed.");
     },
@@ -303,8 +326,33 @@ export default function ChunkReader(props: Props) {
 
       // Preferred: silent session payment (no popup) when a session is active.
       if (hasSession && !forceWallet) {
-        const ok = await doSilentPay(blockIndex, quote);
-        if (ok) return;
+        // Optimistic path (flag on, non-final block): render now, settle in the
+        // background, and run the combined check against the prior block's token.
+        // The server marks the final chunk `optimistic:false` so it confirms first.
+        const optimistic = quote.optimistic === true;
+        const simulateFail =
+          optimistic && new URLSearchParams(window.location.search).get("simfail") === String(blockIndex);
+        const r = await doSilentPay(
+          blockIndex,
+          quote,
+          optimistic ? { optimistic: true, priorToken: lastTokenRef.current, simulateFail } : undefined
+        );
+        if (r.blocked) {
+          // Combined check failed — the prior payment didn't go through. Don't
+          // render this block; surface a resolve state (already-shown stays).
+          setBlocked(true);
+          setError("Your previous payment didn't go through. Retry, or top up your balance to continue.");
+          return;
+        }
+        if (r.ok) {
+          if (optimistic) {
+            lastTokenRef.current = r.token ?? lastTokenRef.current;
+            lastBlockRef.current = blockIndex;
+          }
+          setBlocked(false);
+          setError(null);
+          return;
+        }
         // session unusable → offer setup again.
         setPendingBlock(blockIndex);
         setShowSetup(true);
@@ -330,6 +378,40 @@ export default function ChunkReader(props: Props) {
     } finally {
       setPaying(null);
     }
+  }
+
+  /**
+   * Resolve a blocked combined check: re-pay the prior block whose payment
+   * failed (a fresh optimistic payment, no combined gate), then continue to the
+   * block the reader was trying to reach.
+   */
+  async function retryUnlock(currentBlock: number) {
+    setBlocked(false);
+    setError(null);
+    const prior = lastBlockRef.current;
+    if (prior != null) {
+      setPaying(prior);
+      try {
+        const q = await quoteBlock(prior);
+        if (q.needsPayment) {
+          const r = await doSilentPay(prior, q, { optimistic: true, priorToken: null });
+          if (!r.ok) {
+            setBlocked(true);
+            setError("Still couldn't settle that payment — top up your balance to continue.");
+            return;
+          }
+          lastTokenRef.current = r.token ?? null;
+          lastBlockRef.current = prior;
+        }
+      } catch (e) {
+        setBlocked(true);
+        setError(String((e as Error)?.message ?? e));
+        return;
+      } finally {
+        setPaying(null);
+      }
+    }
+    await unlock(currentBlock);
   }
 
   function onSessionReady(_session: PaySessionInfo) {
@@ -425,7 +507,29 @@ export default function ChunkReader(props: Props) {
               {isNext && (
                 <div className="mt-4 flex flex-col items-center gap-3 text-center">
                   <span className="flex items-center gap-1.5 font-label-caps text-label-caps text-outline"><span className="material-symbols-outlined text-[16px]">lock</span>Block {c.blockIndex} locked</span>
-                  {walletLoading ? (
+                  {blocked ? (
+                    <div className="flex flex-col items-center gap-2">
+                      <p className="font-body-sm text-[13px] text-error">
+                        Your previous payment didn&apos;t go through. Resolve it to keep reading.
+                      </p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => void retryUnlock(c.blockIndex)}
+                          disabled={paying !== null}
+                          className="btn-primary px-6 py-2.5"
+                        >
+                          {paying !== null ? "Retrying…" : "Retry"}
+                        </button>
+                        <button
+                          onClick={() => { setBlocked(false); setShowSetup(true); }}
+                          disabled={paying !== null}
+                          className="btn-outline px-6 py-2.5"
+                        >
+                          Top up
+                        </button>
+                      </div>
+                    </div>
+                  ) : walletLoading ? (
                     <span className="flex items-center gap-2 font-body-sm text-[13px] text-on-surface-variant">
                       <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
                       Checking your wallet…
