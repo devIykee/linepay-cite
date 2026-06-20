@@ -4,6 +4,7 @@ import Link from "next/link";
 import Providers from "./providers";
 import UserMenu from "@/components/UserMenu";
 import { Analytics } from '@vercel/analytics/next';
+import { SpeedInsights } from '@vercel/speed-insights/next';
 import MobileNav from "@/components/MobileNav";
 
 export const metadata: Metadata = {
@@ -68,6 +69,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           <MobileNav />
         </Providers>
         <Analytics />
+        <SpeedInsights />
       </body>
     </html>
   );
