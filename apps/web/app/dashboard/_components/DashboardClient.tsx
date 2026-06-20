@@ -8,6 +8,7 @@ import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
 import { useToast } from "@/components/Toaster";
 import ContentManager from "./ContentManager";
 import EarningsPanel from "./EarningsPanel";
+import WalletPanel from "./WalletPanel";
 
 interface User {
   id: string;
@@ -19,7 +20,7 @@ interface User {
 }
 
 export default function DashboardClient({ user, impersonating }: { user: User; impersonating: boolean }) {
-  const [tab, setTab] = useState<"content" | "earnings">("content");
+  const [tab, setTab] = useState<"content" | "earnings" | "wallet">("content");
   const [walletLinked, setWalletLinked] = useState(user.walletLinked);
 
   return (
@@ -55,7 +56,7 @@ export default function DashboardClient({ user, impersonating }: { user: User; i
       {!walletLinked && !impersonating && <WalletBanner onLinked={() => setWalletLinked(true)} />}
 
       <nav className="mb-8 flex gap-2 border-b border-outline-variant">
-        {(["content", "earnings"] as const).map((t) => (
+        {(["content", "earnings", "wallet"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -66,7 +67,13 @@ export default function DashboardClient({ user, impersonating }: { user: User; i
         ))}
       </nav>
 
-      {tab === "content" ? <ContentManager impersonating={impersonating} /> : <EarningsPanel impersonating={impersonating} walletLinked={walletLinked} />}
+      {tab === "content" ? (
+        <ContentManager impersonating={impersonating} />
+      ) : tab === "earnings" ? (
+        <EarningsPanel impersonating={impersonating} walletLinked={walletLinked} />
+      ) : (
+        <WalletPanel impersonating={impersonating} />
+      )}
     </div>
   );
 }

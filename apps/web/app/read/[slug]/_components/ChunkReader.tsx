@@ -97,6 +97,14 @@ export default function ChunkReader(props: Props) {
   const effectiveWallet = (address ?? embeddedAddr ?? undefined) as Address | undefined;
   const walletKind: "external" | "embedded" | null = address ? "external" : embeddedAddr ? "embedded" : null;
   const hasWallet = !!effectiveWallet;
+  // Embedded status loads async (null until the GET resolves). Until then we
+  // don't know if the user has an embedded wallet — showing the external-only
+  // Connect button in that window would wrongly prompt an embedded user to
+  // connect MetaMask. Treat "unknown" as loading. An external (wagmi) address
+  // is known synchronously, so a connected user is never blocked on this.
+  const walletLoading = !address && embedded.status === null;
+  // Admins always use an external wallet (no embedded provisioning offered).
+  const canCreateEmbedded = embedded.status?.enabled === true && embedded.status?.isAdmin === false;
 
   // Hydrate unlocked chunks from localStorage so refresh keeps progress.
   useEffect(() => {
@@ -324,6 +332,22 @@ export default function ChunkReader(props: Props) {
     if (blk != null) void unlock(blk); // now silent
   }
 
+  /** Create the free embedded wallet, then continue to unlock the pending block. */
+  async function createWalletThenUnlock(blockIndex: number) {
+    setPaying(blockIndex);
+    try {
+      await embedded.provision();
+      toast("success", "Wallet created — you can pay per block now.");
+      // status refresh is async; the user can tap Unlock once it lands.
+    } catch (e) {
+      const msg = String((e as { message?: string })?.message ?? e);
+      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Wallet setup cancelled.");
+      else toast("error", msg, "Couldn't create wallet");
+    } finally {
+      setPaying(null);
+    }
+  }
+
   return (
     <div className="mx-auto max-w-3xl px-margin-mobile py-stack-lg md:px-margin-desktop">
       <div className="mb-6 flex items-center justify-between gap-3">
@@ -385,8 +409,29 @@ export default function ChunkReader(props: Props) {
               {isNext && (
                 <div className="mt-4 flex flex-col items-center gap-3 text-center">
                   <span className="flex items-center gap-1.5 font-label-caps text-label-caps text-outline"><span className="material-symbols-outlined text-[16px]">lock</span>Block {c.blockIndex} locked</span>
-                  {!hasWallet ? (
-                    <ConnectButton />
+                  {walletLoading ? (
+                    <span className="flex items-center gap-2 font-body-sm text-[13px] text-on-surface-variant">
+                      <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
+                      Checking your wallet…
+                    </span>
+                  ) : !hasWallet ? (
+                    <div className="flex flex-col items-center gap-2">
+                      {canCreateEmbedded && (
+                        <button
+                          onClick={() => createWalletThenUnlock(c.blockIndex)}
+                          disabled={paying !== null || embedded.busy}
+                          className="btn-primary px-8 py-3"
+                        >
+                          {paying === c.blockIndex || embedded.busy ? "Creating wallet…" : "Create your free wallet"}
+                        </button>
+                      )}
+                      <ConnectButton />
+                      {canCreateEmbedded && (
+                        <span className="font-body-sm text-[11px] text-outline">
+                          Free wallet (no app), or connect your own.
+                        </span>
+                      )}
+                    </div>
                   ) : (
                     <>
                       <button onClick={() => unlock(c.blockIndex)} disabled={paying !== null} className="btn-primary px-8 py-3">

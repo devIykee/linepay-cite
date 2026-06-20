@@ -117,6 +117,98 @@ export async function getEmbeddedWallet(userToken: string): Promise<EmbeddedWall
 }
 
 /**
+ * Confirm a destination address is valid for USDC on Arc before we let a user
+ * withdraw to it. Returns false on any rejection or API error (fail closed).
+ */
+export async function validateAddress(address: string): Promise<boolean> {
+  try {
+    const res = await circle().validateAddress({
+      address,
+      blockchain: CIRCLE_ARC as never,
+    });
+    return res.data?.isValid === true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Create a USDC transfer (withdrawal) challenge from the user's embedded wallet
+ * to an external address. The frontend executes the returned challengeId with
+ * the user's PIN; Circle broadcasts the transfer. Returns the challengeId and
+ * the transaction id (for status polling). `amountUsdc` is a decimal string.
+ */
+export async function createTransferChallenge(input: {
+  userToken: string;
+  walletId: string;
+  destinationAddress: string;
+  amountUsdc: string;
+  idempotencyKey: string;
+}): Promise<{ challengeId: string }> {
+  const res = await circle().createTransaction({
+    userToken: input.userToken,
+    idempotencyKey: input.idempotencyKey,
+    walletId: input.walletId,
+    destinationAddress: input.destinationAddress,
+    tokenAddress: process.env.NEXT_PUBLIC_USDC_ADDRESS || "",
+    blockchain: CIRCLE_ARC as never,
+    amounts: [input.amountUsdc],
+    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+  } as never);
+  const challengeId = res.data?.challengeId;
+  if (!challengeId) throw new Error("circle_transfer_challenge_failed");
+  return { challengeId };
+}
+
+export interface WalletTx {
+  id: string;
+  state: string;
+  amounts?: string[];
+  destinationAddress?: string;
+  sourceAddress?: string;
+  txHash?: string;
+  createDate?: string;
+  operation?: string;
+}
+
+/** Map a Circle Transaction (loosely typed) into our small WalletTx shape. */
+function toWalletTx(t: Record<string, unknown>, fallbackId = ""): WalletTx {
+  return {
+    id: String(t.id ?? fallbackId),
+    state: String(t.state ?? ""),
+    amounts: (t.amounts as string[]) ?? undefined,
+    destinationAddress: t.destinationAddress as string | undefined,
+    sourceAddress: t.sourceAddress as string | undefined,
+    txHash: t.txHash as string | undefined,
+    createDate: t.createDate as string | undefined,
+    operation: t.operation as string | undefined,
+  };
+}
+
+/** List the embedded wallet's on-chain transactions (for outgoing history). */
+export async function listWalletTransactions(userToken: string, walletId: string): Promise<WalletTx[]> {
+  try {
+    const res = await circle().listTransactions({ userToken, walletIds: [walletId] } as never);
+    const txs = (res.data?.transactions ?? []) as unknown as Array<Record<string, unknown>>;
+    return txs.map((t) => toWalletTx(t));
+  } catch {
+    return [];
+  }
+}
+
+/** Read one transaction's current state (for withdrawal status polling). */
+export async function getWalletTransaction(userToken: string, txId: string): Promise<WalletTx | null> {
+  try {
+    const res = await circle().getTransaction({ userToken, id: txId } as never);
+    const t = res.data?.transaction as unknown as Record<string, unknown> | undefined;
+    if (!t) return null;
+    return toWalletTx(t, txId);
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Create a contract-execution challenge (approve / deposit / addDelegate). The
  * frontend executes it with the PIN; the SCA broadcasts the tx. Returns the
  * challengeId. ABI values come from the caller (Gateway/USDC constants).

@@ -40,7 +40,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 LinePay <span>Cite</span>
               </Link>
               <div className="hidden items-center gap-stack-lg md:flex">
-                <NavLink href="/">Home</NavLink>
                 <NavLink href="/for-you">For You</NavLink>
                 <NavLink href="/docs">Docs</NavLink>
               </div>

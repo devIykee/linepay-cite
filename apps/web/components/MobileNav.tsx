@@ -5,11 +5,11 @@ import { usePathname } from "next/navigation";
 
 /**
  * Mobile bottom navigation ("sandwich bar"). Mirrors the desktop header nav
- * (Home / For You / Docs) plus Dashboard (which on desktop lives in the footer
- * + UserMenu). Hidden at md+ where the top nav takes over.
+ * (For You / Docs) plus Dashboard (which on desktop lives in the footer +
+ * UserMenu). Home is reachable via the LinePay logo, so it's omitted here.
+ * Hidden at md+ where the top nav takes over.
  */
 const ITEMS: { href: string; label: string; icon: string }[] = [
-  { href: "/", label: "Home", icon: "home" },
   { href: "/for-you", label: "For You", icon: "auto_awesome" },
   { href: "/docs", label: "Docs", icon: "menu_book" },
   { href: "/dashboard", label: "Dashboard", icon: "dashboard" },
