@@ -16,7 +16,7 @@ const REASONS: { value: string; label: string }[] = [
  * reports (§5b) use the /api/reports endpoint directly with reportType
  * "broken_link", not this button.
  */
-export default function ReportButton({ contentSlug }: { contentSlug: string }) {
+export default function ReportButton({ contentSlug, iconOnly = false }: { contentSlug: string; iconOnly?: boolean }) {
   const toast = useToast();
   const [open, setOpen] = useState(false);
   const [reason, setReason] = useState("copyright");
@@ -46,11 +46,16 @@ export default function ReportButton({ contentSlug }: { contentSlug: string }) {
     <>
       <button
         onClick={() => setOpen(true)}
-        className="flex items-center gap-1 font-body-sm text-[12px] text-outline hover:text-primary"
+        aria-label="Report this post"
+        className={
+          iconOnly
+            ? "inline-flex h-11 w-11 items-center justify-center rounded-full text-outline transition-colors hover:bg-on-surface/5 hover:text-primary"
+            : "flex items-center gap-1 font-body-sm text-[12px] text-outline hover:text-primary"
+        }
         title="Report this post"
       >
-        <span className="material-symbols-outlined text-[15px]">flag</span>
-        Report
+        <span className={`material-symbols-outlined ${iconOnly ? "text-[20px]" : "text-[15px]"}`}>flag</span>
+        {!iconOnly && "Report"}
       </button>
 
       {open && (

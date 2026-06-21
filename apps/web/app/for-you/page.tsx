@@ -234,12 +234,13 @@ export default function ForYouPage() {
         )}
       </div>
 
-      {/* Feed — Books render as a denser cover grid; everything else as cards. */}
+      {/* Feed — Books render as a cover grid; everything else as borderless
+          rows separated by whitespace (minimalist: no card outlines). */}
       <div
         className={
           tab === "book"
             ? "grid grid-cols-2 gap-gutter sm:grid-cols-3 md:grid-cols-4"
-            : "grid grid-cols-1 gap-gutter md:grid-cols-2"
+            : "grid grid-cols-1 gap-x-gutter gap-y-8 md:grid-cols-2"
         }
       >
         {items.map((c) =>
@@ -249,10 +250,10 @@ export default function ForYouPage() {
           <Link
             key={c.id}
             href={c.url}
-            className="card group flex flex-col text-left transition-all hover:-translate-y-0.5 hover:shadow-md"
+            className="group flex flex-col text-left"
           >
             <div className="mb-2 flex items-center justify-between gap-2">
-              <span className="pill">{TYPE_LABEL[c.contentType] ?? c.contentType}</span>
+              <span className="tag">{TYPE_LABEL[c.contentType] ?? c.contentType}</span>
               <div className="flex items-center gap-2">
                 {c.ownershipVerified && (
                   <span
@@ -263,7 +264,7 @@ export default function ForYouPage() {
                   </span>
                 )}
                 {c.agentUrl && (
-                  <span className="font-data-mono text-[11px] text-primary" title="Agent-readable endpoint">
+                  <span className="font-data-mono text-[11px] text-outline" title="Agent-readable endpoint">
                     agent-ready
                   </span>
                 )}
@@ -287,7 +288,7 @@ export default function ForYouPage() {
               <p className="mb-4 line-clamp-3 flex-grow font-body-sm text-body-sm text-on-surface-variant">{c.summary}</p>
             )}
 
-            <div className="mt-auto flex items-center justify-between gap-2 border-t border-outline-variant/60 pt-3">
+            <div className="mt-auto flex items-center justify-between gap-2 border-t hairline pt-3">
               <div className="flex min-w-0 items-center gap-2">
                 <Avatar name={c.creatorName ?? c.creatorHandle} src={c.creatorAvatar} />
                 <span className="flex min-w-0 flex-col leading-tight">
@@ -297,11 +298,13 @@ export default function ForYouPage() {
                   <span className="truncate font-data-mono text-[11px] text-outline">@{c.creatorHandle ?? "unknown"}</span>
                 </span>
               </div>
-              <div className="flex items-center gap-2 font-data-mono text-[12px]">
+              {/* Passive price — monochrome, not a mint badge. Mint stays for the
+                  active unlock action in the reader only. */}
+              <div className="flex items-center gap-2 font-data-mono text-[12px] text-outline">
                 {typeof c.blockCount === "number" && c.blockCount > 0 && (
-                  <span className="text-outline">{c.blockCount} blocks</span>
+                  <span>{c.blockCount} blocks</span>
                 )}
-                <span className="rounded-full bg-secondary/10 px-2 py-0.5 text-secondary">{formatUsdc(c.pricePerBlock)} USDC</span>
+                <span className="text-on-surface-variant">{formatUsdc(c.pricePerBlock)} USDC</span>
               </div>
             </div>
           </Link>
@@ -331,7 +334,7 @@ export default function ForYouPage() {
 function BookCard({ c }: { c: FeedItem }) {
   return (
     <Link href={c.url} className="group flex flex-col text-left">
-      <div className="relative aspect-[2/3] overflow-hidden rounded-xl border border-outline-variant bg-surface-container-low editorial-shadow">
+      <div className="relative aspect-[2/3] overflow-hidden rounded-xl border hairline bg-surface-container-low editorial-shadow">
         {c.coverImageUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img

@@ -166,6 +166,8 @@ export default function ChunkReader(props: Props) {
   const allUnlocked = payable.length > 0 && unlockedPayable === payable.length;
   // Whole-piece (discounted) total — the ONLY price shown to the reader.
   const wholeDisplay = useMemo(() => wholePiecePrice(pricePerBlock, payable.length), [pricePerBlock, payable.length]);
+  // The whole-piece upsell lives in a sticky bottom bar while anything is locked.
+  const showWholeBar = !allUnlocked && payable.length > 1 && hasWallet;
 
   /** Fetch a fresh quote (price + recipient) for a block. */
   async function quoteBlock(blockIndex: number) {
@@ -527,15 +529,15 @@ export default function ChunkReader(props: Props) {
   }
 
   return (
-    <div className="mx-auto max-w-2xl px-margin-mobile py-stack-lg md:px-margin-desktop">
-      <div className="mb-6 flex items-center justify-between gap-3">
-        <Link href="/for-you" className="inline-flex items-center gap-1 font-label-caps text-label-caps text-outline hover:text-primary">
+    <div className={`mx-auto max-w-2xl px-margin-mobile py-stack-lg md:px-margin-desktop ${showWholeBar ? "pb-40 md:pb-32" : ""}`}>
+      <div className="mb-6 flex items-center justify-between gap-2">
+        <Link href="/for-you" className="inline-flex h-11 items-center gap-1 font-label-caps text-label-caps text-outline hover:text-primary">
           ← For You
         </Link>
-        <div className="flex items-center gap-3">
-          <ShareButton slug={slug} title={title} />
-          <ReportButton contentSlug={slug} />
+        <div className="flex items-center gap-1">
           {hasWallet && <ReadingFuel pricePerBlock={pricePerBlock} onTopUp={() => setShowSetup(true)} />}
+          <ShareButton slug={slug} title={title} iconOnly />
+          <ReportButton contentSlug={slug} iconOnly />
         </div>
       </div>
 
@@ -562,24 +564,9 @@ export default function ChunkReader(props: Props) {
         {sessionActive && <span className="text-secondary">· one-tap on</span>}
       </div>
 
-      {summary && <p className="mb-6 border-l-4 border-outline-variant pl-4 font-body-lg text-on-surface-variant">{summary}</p>}
+      {summary && <p className="mb-8 border-l-2 border-outline-variant pl-4 font-body-lg text-on-surface-variant">{summary}</p>}
 
-      {/* Whole-piece upsell — the single place a price is shown. Skip the bulk
-          discount math for a one-block piece (nothing to discount). */}
-      {!allUnlocked && payable.length > 1 && hasWallet && (
-        <button
-          onClick={() => unlockWhole()}
-          disabled={paying !== null}
-          className="mb-8 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-5 py-3 font-body-md text-primary transition-colors hover:bg-primary/10 disabled:opacity-60"
-        >
-          <span className="material-symbols-outlined text-[18px]">auto_stories</span>
-          {paying === -1
-            ? "Unlocking the whole piece…"
-            : `Unlock the whole ${isPicture ? "set" : "piece"} — ${formatUsdc(wholeDisplay)} USDC`}
-        </button>
-      )}
-
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-6">
         {chunks.map((c) => {
           const text = c.isFree ? c.text : unlocked[c.blockIndex];
           const isUnlocked = text !== undefined && text !== null;
@@ -596,15 +583,22 @@ export default function ChunkReader(props: Props) {
           }
           const isNext = nextLocked?.id === c.id;
           return (
-            <div key={c.id} className="relative overflow-hidden rounded-xl bg-surface-container-low/60 p-5">
-              <div className="select-none blur-[5px]" aria-hidden>
-                {"████ ██████ ████████ ███ ██████ █████ ████████ ██████ ███ █████ ████ ██████ ███████."}
+            <div key={c.id} className="relative py-2">
+              {/* Borderless blurred continuation — same column as the article,
+                  fading into the page background (no card, no hard edges). */}
+              <div
+                className="pointer-events-none select-none space-y-3 font-reading text-reading leading-relaxed text-on-surface-variant blur-[6px] [mask-image:linear-gradient(to_bottom,rgba(0,0,0,0.85),transparent)]"
+                aria-hidden
+              >
+                <p>{"████████ ██████ ████ ███████ █████ ████████ ██████ ████ ██████ ████."}</p>
+                <p>{"███ █████ ████████ ██████ ███ █████ ████ ██████ ███████ ████ ███ ██."}</p>
+                <p>{"██████ ████ ███████ █████ ████████ ██████ ████ ██████ ███ ████."}</p>
               </div>
+
               {isNext && (
-                <div className="mt-4 flex flex-col items-center gap-3 text-center">
-                  <span className="flex items-center gap-1.5 font-label-caps text-label-caps text-outline"><span className="material-symbols-outlined text-[16px]">lock</span>Block {c.blockIndex} locked</span>
+                <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center">
                   {blocked ? (
-                    <div className="flex flex-col items-center gap-2">
+                    <div className="flex flex-col items-center gap-2 rounded-2xl border hairline bg-surface/70 px-5 py-4 backdrop-blur">
                       <p className="font-body-sm text-[13px] text-error">
                         Your previous payment didn&apos;t go through. Resolve it to keep reading.
                       </p>
@@ -612,31 +606,31 @@ export default function ChunkReader(props: Props) {
                         <button
                           onClick={() => void retryUnlock(c.blockIndex)}
                           disabled={paying !== null}
-                          className="btn-primary px-6 py-2.5"
+                          className="rounded-full bg-primary px-6 py-2.5 font-label-caps text-label-caps text-on-primary transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
                         >
                           {paying !== null ? "Retrying…" : "Retry"}
                         </button>
                         <button
                           onClick={() => { setBlocked(false); setShowSetup(true); }}
                           disabled={paying !== null}
-                          className="btn-outline px-6 py-2.5"
+                          className="rounded-full border hairline px-6 py-2.5 font-label-caps text-label-caps text-on-surface transition-colors hover:bg-on-surface/5 disabled:opacity-50"
                         >
                           Add funds
                         </button>
                       </div>
                     </div>
                   ) : walletLoading ? (
-                    <span className="flex items-center gap-2 font-body-sm text-[13px] text-on-surface-variant">
+                    <span className="inline-flex items-center gap-2 rounded-full bg-surface/70 px-4 py-2 font-body-sm text-[13px] text-on-surface-variant backdrop-blur">
                       <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
                       Checking your wallet…
                     </span>
                   ) : !hasWallet ? (
-                    <div className="flex flex-col items-center gap-2">
+                    <div className="flex flex-col items-center gap-2 rounded-2xl border hairline bg-surface/70 px-5 py-4 backdrop-blur">
                       {canCreateEmbedded && (
                         <button
                           onClick={() => createWalletThenUnlock(c.blockIndex)}
                           disabled={paying !== null || embedded.busy}
-                          className="btn-primary px-8 py-3"
+                          className="rounded-full bg-primary px-8 py-3 font-label-caps text-label-caps text-on-primary transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
                         >
                           {paying === c.blockIndex || embedded.busy ? "Creating wallet…" : "Create your free wallet"}
                         </button>
@@ -650,10 +644,19 @@ export default function ChunkReader(props: Props) {
                     </div>
                   ) : (
                     <>
-                      {/* Platform-wide rule: the unlock button always reads
-                          "Read on" — never the price, and the price is not shown
-                          anywhere adjacent to it. */}
-                      <button onClick={() => unlock(c.blockIndex)} disabled={paying !== null} className="btn-primary px-8 py-3">
+                      {/* Muted lock caption — low-contrast, never competing with the CTA. */}
+                      <span className="inline-flex items-center gap-1 font-label-caps text-[10px] uppercase tracking-wide text-outline/70">
+                        <span className="material-symbols-outlined text-[13px]">lock</span>
+                        Block {c.blockIndex} locked
+                      </span>
+                      {/* Platform-wide rule: the unlock CTA always reads "Read on" —
+                          never the price. A pill floating dead-center over the blur,
+                          lifted off the page with a subtle shadow. */}
+                      <button
+                        onClick={() => unlock(c.blockIndex)}
+                        disabled={paying !== null}
+                        className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-primary px-8 py-3 font-label-caps text-label-caps text-on-primary shadow-lg shadow-primary/20 ring-1 ring-black/5 transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
+                      >
                         {paying === c.blockIndex
                           ? sessionActive ? "Unlocking…" : walletKind === "embedded" ? "Setting up…" : "Confirm in wallet…"
                           : "Read on"}
@@ -682,6 +685,26 @@ export default function ChunkReader(props: Props) {
         <div className="mt-8 flex items-center justify-center gap-2 rounded-xl border border-secondary/30 bg-secondary/5 p-6 text-center font-body-md text-secondary">
           <span className="material-symbols-outlined text-[20px]">check_circle</span>
           Fully unlocked — every block paid the creator directly.
+        </div>
+      )}
+
+      {/* Sticky bottom bar — the whole-piece upsell (the single place a price is
+          shown). Spans the text column, backdrop-blurred to feel integrated, and
+          clears the mobile bottom nav (bottom-14) + home-indicator safe area. */}
+      {showWholeBar && (
+        <div className="fixed inset-x-0 bottom-14 z-40 border-t hairline bg-surface/80 backdrop-blur md:bottom-0">
+          <div className="mx-auto max-w-2xl px-margin-mobile py-3 pb-safe md:px-margin-desktop">
+            <button
+              onClick={() => unlockWhole()}
+              disabled={paying !== null}
+              className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 font-label-caps text-label-caps text-on-primary shadow-sm transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50"
+            >
+              <span className="material-symbols-outlined text-[18px]">auto_stories</span>
+              {paying === -1
+                ? "Unlocking the whole piece…"
+                : `Unlock the whole ${isPicture ? "set" : "piece"} — ${formatUsdc(wholeDisplay)} USDC`}
+            </button>
+          </div>
         </div>
       )}
 

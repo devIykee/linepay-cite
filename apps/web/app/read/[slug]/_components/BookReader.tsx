@@ -337,12 +337,12 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
     <div className="fixed inset-0 z-[60] flex flex-col bg-surface text-on-surface">
       {/* ── Top chrome ─────────────────────────────────────────────────────── */}
       <div
-        className={`absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-3 border-b border-outline-variant bg-surface/95 px-4 py-3 backdrop-blur transition-transform duration-200 ${
+        className={`absolute inset-x-0 top-0 z-20 flex items-center justify-between gap-3 border-b hairline bg-surface/80 px-4 py-3 pt-safe backdrop-blur transition-transform duration-200 ${
           chromeVisible ? "translate-y-0" : "-translate-y-full"
         }`}
       >
-        <Link href="/for-you" className="inline-flex items-center gap-1 font-label-caps text-label-caps text-outline hover:text-primary">
-          ← For You
+        <Link href="/for-you" aria-label="Back to For You" className="inline-flex h-11 items-center gap-1 font-label-caps text-label-caps text-outline hover:text-primary">
+          <span className="material-symbols-outlined text-[20px]">arrow_back</span>
         </Link>
         <div className="min-w-0 flex-1 truncate text-center font-headline-sm text-[15px]">
           {title}
@@ -397,7 +397,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
 
         {/* No-wallet gate (shown over the surface when the next page needs paying). */}
         {!hasWallet && current + 1 < pages.length && !isPageUnlocked(pages[current + 1]) && chromeVisible && (
-          <div className="absolute inset-x-0 bottom-24 z-30 mx-auto flex max-w-sm flex-col items-center gap-2 rounded-xl border border-outline-variant bg-surface-container-high p-4 text-center shadow-lg">
+          <div className="absolute inset-x-0 bottom-24 z-30 mx-auto flex max-w-sm flex-col items-center gap-2 rounded-2xl border hairline bg-surface/80 p-4 text-center shadow-lg backdrop-blur">
             <p className="font-body-sm text-[13px] text-on-surface-variant">Create your free wallet to keep reading.</p>
             {canCreateEmbedded && (
               <button onClick={createWallet} disabled={embedded.busy} className="btn-primary px-6 py-2">
@@ -411,7 +411,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
 
       {/* ── Bottom chrome ──────────────────────────────────────────────────── */}
       <div
-        className={`absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t border-outline-variant bg-surface/95 px-4 py-3 backdrop-blur transition-transform duration-200 ${
+        className={`absolute inset-x-0 bottom-0 z-20 flex flex-col gap-2 border-t hairline bg-surface/80 px-4 py-3 pb-safe backdrop-blur transition-transform duration-200 ${
           chromeVisible ? "translate-y-0" : "translate-y-full"
         }`}
       >
@@ -419,7 +419,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
           <button
             onClick={() => unlockWhole()}
             disabled={paying !== null}
-            className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 font-body-sm text-primary hover:bg-primary/10 disabled:opacity-60"
+            className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full bg-primary px-4 py-2.5 font-label-caps text-label-caps text-on-primary shadow-sm transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50"
           >
             <span className="material-symbols-outlined text-[16px]">auto_stories</span>
             Unlock the whole book — {formatUsdc(wholeDisplay)} USDC
@@ -448,7 +448,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
       {chapterListOpen && (
         <div className="absolute inset-0 z-40 flex" onClick={() => setChapterListOpen(false)}>
           <div
-            className="ml-auto h-full w-72 max-w-[80vw] overflow-y-auto border-l border-outline-variant bg-surface p-4 shadow-xl"
+            className="ml-auto h-full w-72 max-w-[80vw] overflow-y-auto border-l hairline bg-surface p-4 pt-safe shadow-xl"
             onClick={(e) => e.stopPropagation()}
           >
             <h3 className="mb-3 font-headline-sm text-[16px]">Chapters</h3>

@@ -494,24 +494,36 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         )}
       </div>
 
-      {/* Content table */}
-      <div className="card">
+      {/* Content table — borderless listing: hairline rows, monochrome meta. */}
+      <div>
         <h2 className="mb-4 font-headline-sm text-headline-sm">Your content</h2>
         <div className="overflow-x-auto">
           <table className="w-full text-left text-body-sm">
-            <thead className="font-label-caps text-label-caps text-on-surface-variant">
-              <tr className="border-b border-outline"><th className="py-2">Title</th><th>Type</th><th>Price</th><th>Status</th><th>Actions</th></tr>
+            <thead className="font-label-caps text-label-caps text-outline">
+              <tr className="border-b hairline">
+                <th className="py-2 font-normal">Title</th>
+                <th className="font-normal">Type</th>
+                <th className="font-normal">Price</th>
+                <th className="font-normal">Status</th>
+                <th className="font-normal">Actions</th>
+              </tr>
             </thead>
             <tbody>
               {list.map((c) => (
-                <tr key={c.id} className="border-b border-outline-variant">
-                  <td className="py-2"><a href={`/read/${c.slug}`} className="text-primary">{c.title}</a></td>
-                  <td><span className="pill">{c.content_type}</span></td>
-                  <td>{formatUsdc(c.price_per_block)} USDC</td>
-                  <td>{c.status}</td>
-                  <td className="flex gap-1 py-2">
-                    <button disabled={disabled} onClick={() => toggle(c.id, c.status)} className="btn-outline px-2 py-1 text-[11px]">{c.status === "published" ? "Unpublish" : "Publish"}</button>
-                    <button disabled={disabled} onClick={() => remove(c.id)} className="btn-outline px-2 py-1 text-[11px] text-red-600">Delete</button>
+                <tr key={c.id} className="border-b hairline">
+                  <td className="py-3 pr-3"><a href={`/read/${c.slug}`} className="font-body-md text-on-surface hover:text-primary">{c.title}</a></td>
+                  <td><span className="tag">{c.content_type}</span></td>
+                  <td className="font-data-mono text-[12px] text-on-surface-variant">{formatUsdc(c.price_per_block)} USDC</td>
+                  <td>
+                    <span className={`font-label-caps text-[10px] uppercase tracking-wide ${c.status === "published" ? "text-secondary" : "text-outline"}`}>
+                      {c.status}
+                    </span>
+                  </td>
+                  <td className="py-3">
+                    <div className="flex gap-4">
+                      <button disabled={disabled} onClick={() => toggle(c.id, c.status)} className="font-label-caps text-label-caps text-on-surface-variant transition-colors hover:text-primary disabled:opacity-50">{c.status === "published" ? "Unpublish" : "Publish"}</button>
+                      <button disabled={disabled} onClick={() => remove(c.id)} className="font-label-caps text-label-caps text-outline transition-colors hover:text-error disabled:opacity-50">Delete</button>
+                    </div>
                   </td>
                 </tr>
               ))}

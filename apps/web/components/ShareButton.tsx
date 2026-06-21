@@ -13,7 +13,7 @@ import { useToast } from "@/components/Toaster";
  * an ineligible link. Signed in, it builds the ref link and uses the native
  * share sheet (mobile) or clipboard.
  */
-export default function ShareButton({ slug, title }: { slug: string; title: string }) {
+export default function ShareButton({ slug, title, iconOnly = false }: { slug: string; title: string; iconOnly?: boolean }) {
   const { data: session, status } = useSession();
   const router = useRouter();
   const toast = useToast();
@@ -50,6 +50,20 @@ export default function ShareButton({ slug, title }: { slug: string; title: stri
     } catch {
       toast("error", "Couldn't copy the link — copy it from the address bar.");
     }
+  }
+
+  if (iconOnly) {
+    return (
+      <button
+        onClick={onShare}
+        disabled={status === "loading"}
+        aria-label="Share"
+        className="inline-flex h-11 w-11 items-center justify-center rounded-full text-outline transition-colors hover:bg-on-surface/5 hover:text-primary disabled:opacity-50"
+        title={loggedIn ? "Share & earn referral rewards" : "Sign in to share and earn rewards"}
+      >
+        <span className="material-symbols-outlined text-[20px]">share</span>
+      </button>
+    );
   }
 
   return (

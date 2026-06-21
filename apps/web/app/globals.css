@@ -58,21 +58,23 @@
 
 .dark {
   color-scheme: dark;
-  --background: 9 9 11;
-  --surface: 9 9 11;
-  --surface-bright: 24 24 27;
-  --surface-dim: 10 10 12;
-  --surface-container-lowest: 16 16 18;
-  --surface-container-low: 24 24 27;
-  --surface-container: 31 31 35;
-  --surface-container-high: 39 39 42;
-  --surface-container-highest: 46 46 51;
-  --surface-variant: 39 39 42;
+  /* Deep rich grays — never pure black (minimalist principle #2). The surface
+     ladder steps up from #121214 so cards/sheets separate by tone, not borders. */
+  --background: 18 18 20;
+  --surface: 18 18 20;
+  --surface-bright: 39 39 43;
+  --surface-dim: 14 14 16;
+  --surface-container-lowest: 26 26 29;
+  --surface-container-low: 31 31 35;
+  --surface-container: 37 37 41;
+  --surface-container-high: 44 44 48;
+  --surface-container-highest: 51 51 56;
+  --surface-variant: 37 37 41;
   --on-surface: 228 228 231;
   --on-background: 228 228 231;
-  --on-surface-variant: 180 168 162;
-  --outline: 168 155 148;
-  --outline-variant: 77 69 64;
+  --on-surface-variant: 161 161 170;
+  --outline: 150 150 160;
+  --outline-variant: 44 44 49;
   --primary: 255 155 115;
   --on-primary: 58 20 0;
   --primary-container: 184 89 51;
@@ -174,10 +176,19 @@ textarea.input-editorial:focus {
     @apply inline-flex items-center justify-center gap-2 rounded-lg border-2 border-on-surface px-gutter py-stack-sm font-label-caps text-label-caps text-on-surface transition-all hover:bg-surface-container-low active:scale-95 disabled:opacity-40;
   }
   .card {
-    @apply rounded-xl border border-on-surface/10 bg-surface-container-lowest p-stack-lg editorial-shadow;
+    @apply rounded-xl border border-on-surface/[0.06] bg-surface-container-lowest p-stack-lg;
   }
   .pill {
     @apply inline-flex items-center rounded-full bg-secondary/10 px-3 py-1 font-label-caps text-[10px] text-secondary;
+  }
+  /* Neutral, monochrome chip — type labels and passive pricing. Mint (.pill)
+     is reserved for an active financial action (minimalist principle #4). */
+  .tag {
+    @apply inline-flex items-center rounded-full px-2.5 py-0.5 font-label-caps text-[10px] uppercase tracking-wide text-outline;
+  }
+  /* Hairline divider — the only structure in a borderless layout. */
+  .hairline {
+    @apply border-black/[0.06] dark:border-white/[0.07];
   }
   .label-caps {
     @apply font-label-caps text-label-caps uppercase text-outline;
@@ -185,4 +196,17 @@ textarea.input-editorial:focus {
   .code-chip {
     @apply inline-flex items-center gap-2 rounded bg-surface-container-low px-2 py-1 font-data-mono text-[12px] text-on-surface-variant;
   }
+}
+
+/* Safe-area insets for notches / home indicators on mobile (sticky bars, the
+   immersive reader chrome). Falls back to the base padding on devices without
+   insets via max(). */
+.pb-safe {
+  padding-bottom: max(0.75rem, env(safe-area-inset-bottom));
+}
+.pt-safe {
+  padding-top: max(0.75rem, env(safe-area-inset-top));
+}
+.bottom-safe {
+  bottom: env(safe-area-inset-bottom);
 }
