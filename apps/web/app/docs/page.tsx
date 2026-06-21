@@ -26,9 +26,11 @@ export default function DocsPage() {
         <span className="label-caps text-primary">DOCUMENTATION</span>
         <h1 className="mt-1 font-display-lg text-display-lg-mobile md:text-display-lg">Get paid for your writing, one block at a time</h1>
         <p className="mt-2 max-w-2xl font-body-lg text-body-lg text-on-surface-variant">
-          Skimflow lets you publish text — articles or AI&nbsp;agent skills — and charge a tiny
-          amount to unlock it. Both people <em>and</em> autonomous AI agents can pay, in USDC, on the
-          Arc test network. New here? This page walks you through the whole idea in a few minutes.
+          Skimflow lets you publish what you make — articles, serialized books, picture stories, or
+          AI&nbsp;agent skills — and charge a tiny amount to unlock it. Readers see a free preview,
+          then tap to read on; payment happens quietly in the background. Both people <em>and</em>
+          {" "}autonomous AI agents can pay, in USDC, on the Arc test network. New here? This page
+          walks you through the whole idea in a few minutes.
         </p>
       </header>
 
@@ -37,7 +39,7 @@ export default function DocsPage() {
         {[
           ["1", "You publish text", "Paste an article or an agent skill. We automatically split it into small “blocks” (a few paragraphs each)."],
           ["2", "Readers unlock blocks", "The first block is a free preview. Each block after it costs a few cents — or a fraction of a cent — to unlock."],
-          ["3", "You get paid instantly", "Every unlock pays you in USDC. You keep 85%. Earnings show up live on your dashboard."],
+          ["3", "You get paid instantly", "Every unlock pays you in USDC. You keep 80% (more when there's no referrer). Earnings show up live on your dashboard."],
         ].map(([n, title, body]) => (
           <div key={n} className="rounded-xl border border-outline-variant bg-surface-container-low p-4">
             <div className="flex h-7 w-7 items-center justify-center rounded-full bg-primary font-data-mono text-[13px] text-on-primary">{n}</div>
@@ -69,10 +71,12 @@ export default function DocsPage() {
       </nav>
 
       <H2 id="what">What you can sell</H2>
-      <p className="font-body-md text-on-surface-variant">There are two kinds of content. They&apos;re read a little differently, but they&apos;re priced and paid for the same way.</p>
+      <p className="font-body-md text-on-surface-variant">There are four kinds of content. They&apos;re read a little differently, but they&apos;re priced and paid for the same way — a free preview, then unlock the rest block by block.</p>
       <ul className="mt-stack-md grid grid-cols-1 gap-3 md:grid-cols-2">
         {[
-          ["article", "Essays, reporting, blog posts, serial fiction — anything prose. Readers get a clean reading view, unlocking block by block."],
+          ["article", "Essays, reporting, blog posts, short fiction — anything prose. Readers get a clean reading view, unlocking block by block."],
+          ["book", "Serialized, long-form fiction or non-fiction. Add chapters and pages from the Chapter Builder; readers turn pages in an immersive full-screen reader, paying per page as they go."],
+          ["picture", "A Skim-Flow: an ordered sequence of images. The first is a free preview; each image after it unlocks on its own. Great for photo essays, comics, or step-by-steps."],
           ["agent-skills", "A reusable skill, system prompt, or knowledge file written for AI agents to buy and use. Served as Markdown at a machine-friendly endpoint."],
         ].map(([k, d]) => (
           <li key={k} className="rounded-lg border border-on-surface/10 bg-surface-container-lowest p-3">
@@ -88,13 +92,17 @@ export default function DocsPage() {
         <li><strong>The first block is always free.</strong> It&apos;s the preview that convinces someone to pay for the rest — a paywall with no preview just gets skipped.</li>
         <li><strong>Price per block</strong> can be tiny, e.g. <span className="font-data-mono text-body-sm">0.002</span> ($0.002 — a fifth of a cent). Pick whatever fits; you can change it any time.</li>
         <li><strong>Re-pricing is instant.</strong> Every unlock is quoted fresh, so a price change takes effect on the next reader.</li>
+        <li><strong>Buy the whole piece.</strong> Readers can unlock everything in one tap for a small bulk discount (5% off the per-block total) — handy for a long article or a whole book.</li>
+        <li><strong>One-tap reading.</strong> After a quick one-time setup, unlocks happen silently in the background — no wallet popup per block. A readers&apos;-side &ldquo;reading&nbsp;fuel&rdquo; balance shows how much is left.</li>
       </ul>
 
       <H2 id="publish">Publishing</H2>
       <p className="font-body-md text-on-surface-variant">
         The easy way: open the <Link href="/dashboard" className="text-primary">Creator Dashboard</Link>, sign in
-        with Google or GitHub, add a payout wallet, and hit <strong>New content</strong>. Paste your text, set a
-        price, publish. Done in under a minute.
+        with Google or GitHub, add a payout wallet, and hit <strong>New content</strong> for an article, Skim-Flow, or
+        agent skill. Paste your text or image links, set a price, publish. Done in under a minute. Writing long-form?
+        Use <strong>New book</strong> to open the Chapter Builder — add chapters, split pages with a{" "}
+        <span className="font-data-mono text-body-sm">---</span> line, and publish the whole book at once.
       </p>
       <p className="mt-stack-md font-body-md text-on-surface-variant">Prefer the API? Once you&apos;re signed in, your browser session can post to the same endpoint the dashboard uses:</p>
       <Code lang="http">{`POST /api/creator/content      (requires you to be signed in)`}</Code>
@@ -111,10 +119,16 @@ export default function DocsPage() {
 
       <H2 id="humans">How people read</H2>
       <p className="font-body-md text-on-surface-variant">
-        Every article has a public page at <span className="font-data-mono text-body-sm">/read/&lt;slug&gt;</span>. A reader
-        sees the title, summary, and the free first block. To read more they connect a wallet (with a little USDC on
-        Arc testnet) and click to unlock the next block — the payment is signed in their wallet and the text appears
-        instantly. Unlocked blocks stay unlocked on that device. No account or subscription required.
+        Every piece has a public page at <span className="font-data-mono text-body-sm">/read/&lt;slug&gt;</span>. A reader
+        sees the title, summary, and the free first block. To read more they bring a little USDC on Arc testnet — either
+        with their own wallet, or a free in-app wallet they can create in a couple of taps (no download). The first unlock
+        runs a quick one-time setup; after that, tapping <em>Read on</em> unlocks the next block silently, with no popup.
+        Unlocked blocks stay unlocked on that device. No account or subscription required.
+      </p>
+      <p className="mt-stack-md font-body-md text-on-surface-variant">
+        <strong>Books</strong> open in an immersive full-screen reader: turn pages by tapping the edges, swiping, or the
+        arrow keys, and each new page is paid for invisibly as you reach it. <strong>Skim-Flows</strong> reveal one image
+        at a time. Any reader can also unlock the whole piece at once for the bulk discount.
       </p>
 
       <H2 id="agents">How AI agents buy (the interesting part)</H2>
@@ -163,10 +177,11 @@ const block = await res.text();   // the unlocked block — ready to use`}</Code
 
       <H2 id="splits">Your earnings</H2>
       <p className="font-body-md text-on-surface-variant">
-        Every unlock splits automatically: <strong className="text-primary">85% to you</strong>, 10% to the platform,
-        and 5% to a referrer if someone sent the reader your way (otherwise that 5% rolls into your share). Payments
-        land in the wallet you set on your <Link href="/dashboard" className="text-primary">dashboard</Link>, and your
-        running total updates in real time.
+        Every unlock splits automatically: <strong className="text-primary">80% to you</strong>, 12% to the platform,
+        5% to a referrer if someone sent the reader your way, and 3% to a small reserve. When there&apos;s no referrer,
+        that 5% folds into the reserve — so a no-referrer unlock is 80% you / 12% platform / 8% reserve. Payments land in
+        the wallet you set on your <Link href="/dashboard" className="text-primary">dashboard</Link>, and your running
+        total updates in real time.
       </p>
 
       <H2 id="live">Going live (real payments)</H2>

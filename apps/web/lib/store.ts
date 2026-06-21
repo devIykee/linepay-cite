@@ -937,6 +937,42 @@ export function revokePaySession(id: string): Promise<PaySessionRow | undefined>
   );
 }
 
+/**
+ * Re-activate the most recent (non-expired) session for a wallet + session key
+ * that was paused/revoked. Used to resume silent paying against an
+ * already-funded Gateway balance without a fresh deposit — the cap/spent tally
+ * is preserved, so the remaining "reading fuel" reflects what's actually left.
+ * Returns undefined when there's no prior session to resume. Any *other* active
+ * session for the wallet is revoked first (one session per wallet; this also
+ * frees the partial unique index on session_address).
+ */
+export async function resumePaySession(
+  mainWallet: string,
+  sessionAddress: string
+): Promise<PaySessionRow | undefined> {
+  return tx(async (client) => {
+    const { rows: candidates } = await client.query<PaySessionRow>(
+      `SELECT * FROM pay_sessions
+         WHERE main_wallet=$1 AND session_address=$2
+           AND (expires_at IS NULL OR expires_at > NOW())
+         ORDER BY created_at DESC LIMIT 1`,
+      [mainWallet, sessionAddress]
+    );
+    const target = candidates[0];
+    if (!target) return undefined;
+    await client.query(
+      `UPDATE pay_sessions SET status='revoked', revoked_at=NOW()
+         WHERE main_wallet=$1 AND status='active' AND id<>$2`,
+      [mainWallet, target.id]
+    );
+    const { rows } = await client.query<PaySessionRow>(
+      `UPDATE pay_sessions SET status='active', revoked_at=NULL WHERE id=$1 RETURNING *`,
+      [target.id]
+    );
+    return rows[0];
+  });
+}
+
 /** Earnings rollup for a creator (completed rows only). */
 export async function creatorEarnings(creatorId: string): Promise<{
   totalEarned: string;

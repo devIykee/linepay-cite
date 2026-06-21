@@ -7,26 +7,45 @@ import { Analytics } from '@vercel/analytics/next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import MobileNav from "@/components/MobileNav";
 import ThemeToggle from "@/components/ThemeToggle";
+import Logo from "@/components/Logo";
 
 const SITE_NAME = "Skimflow";
-const SITE_TAGLINE = "Skimflow — get paid every time someone reads a line";
+const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://skimflow-ten.vercel.app").replace(/\/$/, "");
+const SITE_TAGLINE = "Skimflow — pay-per-block reading for people and AI agents";
 const SITE_DESCRIPTION =
-  "Per-line nanopayments for article writers and light-novel authors, with an autonomous reading agent. Built on x402 + Circle Gateway + Arc.";
+  "Publish articles, serialized books, and picture stories — or AI agent skills — and earn USDC every time someone unlocks a block. Read the free preview, then tap to read on: frictionless micro-payments on Arc for humans and autonomous agents alike, powered by x402 + Circle Gateway.";
 
 export const metadata: Metadata = {
+  metadataBase: new URL(SITE_URL),
   title: SITE_TAGLINE,
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
+  keywords: [
+    "pay-per-block",
+    "micropayments",
+    "USDC",
+    "Arc",
+    "x402",
+    "Circle Gateway",
+    "serialized books",
+    "web novels",
+    "AI agent skills",
+    "creator monetization",
+  ],
+  icons: { icon: "/icon.svg", apple: "/icon.svg" },
   openGraph: {
     title: SITE_TAGLINE,
     description: SITE_DESCRIPTION,
     siteName: SITE_NAME,
+    url: SITE_URL,
     type: "website",
+    images: [{ url: "/logo.svg", width: 1200, height: 1200, alt: "Skimflow" }],
   },
   twitter: {
     card: "summary_large_image",
     title: SITE_TAGLINE,
     description: SITE_DESCRIPTION,
+    images: ["/logo.svg"],
   },
 };
 
@@ -59,12 +78,12 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           {/* Authoritative sticky header (DESIGN.md → Navigation). Uses surface
               tokens so it adapts cleanly in light + dark. */}
           <header className="sticky top-0 z-50 border-b border-outline-variant bg-surface/90 shadow-sm backdrop-blur">
-            <nav className="mx-auto flex max-w-max-width items-center justify-between px-margin-mobile py-4 md:px-margin-desktop">
-              <Link
-                href="/"
-                className="font-headline-sm text-headline-sm font-bold text-on-surface [&>span]:text-primary"
-              >
-                Skim<span>flow</span>
+            <nav className="mx-auto flex max-w-max-width items-center justify-between px-margin-mobile pb-4 pt-[max(1rem,env(safe-area-inset-top))] md:px-margin-desktop">
+              <Link href="/" className="flex items-center gap-2" aria-label="Skimflow home">
+                <Logo className="h-8 w-8 shrink-0 rounded-md" />
+                <span className="font-headline-sm text-headline-sm font-bold text-on-surface [&>span]:text-primary">
+                  Skim<span>flow</span>
+                </span>
               </Link>
               <div className="hidden items-center gap-stack-lg md:flex">
                 <NavLink href="/for-you">For You</NavLink>
@@ -82,7 +101,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
 
           <footer className="border-t border-outline-variant bg-surface-container-low">
             <div className="mx-auto flex max-w-max-width flex-col items-center justify-between gap-stack-md px-margin-mobile py-stack-lg md:flex-row md:px-margin-desktop">
-              <div className="label-caps text-on-surface">SKIMFLOW</div>
+              <div className="flex items-center gap-2">
+                <Logo className="h-6 w-6 shrink-0 rounded" />
+                <span className="label-caps text-on-surface">SKIMFLOW</span>
+              </div>
               <div className="font-body-sm text-body-sm text-on-surface-variant">
                 x402 · Circle Gateway · USDC on Arc
               </div>

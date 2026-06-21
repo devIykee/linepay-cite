@@ -1,9 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useAccount } from "wagmi";
 import { useToast } from "@/components/Toaster";
-import { clearSessionKey } from "@/lib/session-key-client";
 
 interface BalanceState {
   active: boolean;
@@ -32,7 +30,6 @@ interface Props {
 export default function ReadingFuel({ pricePerBlock, onTopUp }: Props) {
   const [state, setState] = useState<BalanceState>({ active: false });
   const [revealed, setRevealed] = useState(false);
-  const { address } = useAccount();
   const toast = useToast();
   const warnedRef = useRef(false);
 
@@ -69,9 +66,11 @@ export default function ReadingFuel({ pricePerBlock, onTopUp }: Props) {
   async function revoke() {
     try {
       await fetch("/api/pay-session/revoke", { method: "POST" });
-      if (address) clearSessionKey(address);
+      // Keep the local session key (and the on-chain delegate it represents) so
+      // the reader can silently resume against the still-funded Gateway balance
+      // on the next "Read on" — without depositing again.
       setState({ active: false });
-      toast("info", "Reading session ended.");
+      toast("info", "Reading session ended — your balance stays put if you read on again.");
       window.dispatchEvent(new Event(PAY_SESSION_EVENT));
     } catch {
       toast("error", "Couldn't end the session.");

@@ -10,7 +10,7 @@ import type { Address } from "viem";
 import { useToast } from "@/components/Toaster";
 import { wagmiConfig } from "@/lib/wagmi";
 import { formatUsdc, wholePiecePrice } from "@/lib/money";
-import { buildSessionPayment } from "@/lib/session-key-client";
+import { buildSessionPayment, loadSessionAccount } from "@/lib/session-key-client";
 import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
 import PaySetupModal, { type PaySessionInfo } from "@/components/PaySetupModal";
 import ReadingFuel, { PAY_SESSION_EVENT } from "@/components/ReadingFuel";
@@ -166,8 +166,6 @@ export default function ChunkReader(props: Props) {
   const allUnlocked = payable.length > 0 && unlockedPayable === payable.length;
   // Whole-piece (discounted) total — the ONLY price shown to the reader.
   const wholeDisplay = useMemo(() => wholePiecePrice(pricePerBlock, payable.length), [pricePerBlock, payable.length]);
-  // The whole-piece upsell lives in a sticky bottom bar while anything is locked.
-  const showWholeBar = !allUnlocked && payable.length > 1 && hasWallet;
 
   /** Fetch a fresh quote (price + recipient) for a block. */
   async function quoteBlock(blockIndex: number) {
@@ -177,6 +175,38 @@ export default function ChunkReader(props: Props) {
       body: JSON.stringify({ blockIndex }),
     });
     return res.json();
+  }
+
+  /**
+   * Silently re-activate a prior pay-session (e.g. after the reader ended it
+   * from the fuel chip) instead of prompting a fresh deposit. The Gateway is
+   * still funded and the session key is still a delegate, so the remaining fuel
+   * just continues from where it was. Returns true if a session was restored.
+   */
+  async function tryResume(): Promise<boolean> {
+    if (!effectiveWallet) return false;
+    const acct = loadSessionAccount(effectiveWallet);
+    if (!acct) return false; // no local key → genuine first-time setup
+    try {
+      const res = await fetch("/api/pay-session/resume", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          mainWallet: effectiveWallet,
+          sessionAddress: acct.address,
+          source: walletKind === "embedded" ? "embedded" : "external",
+        }),
+      });
+      const d = await res.json();
+      if (res.ok && d.ok) {
+        setSessionActive(true);
+        window.dispatchEvent(new Event(PAY_SESSION_EVENT));
+        return true;
+      }
+    } catch {
+      /* fall through to the setup modal */
+    }
+    return false;
   }
 
   /**
@@ -319,7 +349,7 @@ export default function ChunkReader(props: Props) {
     // `sessionReady` lets the just-completed setup signal an active session
     // without waiting for the async `sessionActive` state to flush — otherwise
     // this call reads the stale `false` and re-opens the setup modal.
-    const hasSession = sessionActive || !!opts?.sessionReady;
+    let hasSession = sessionActive || !!opts?.sessionReady;
     setPaying(blockIndex);
     setError(null);
     try {
@@ -329,6 +359,11 @@ export default function ChunkReader(props: Props) {
         return;
       }
       if (!quote.needsPayment) throw new Error(quote.friendly ?? quote.error ?? "Could not price this block.");
+
+      // No active session, but the reader may have one to resume (they ended it
+      // earlier while the Gateway still holds funds). Restore it silently rather
+      // than asking them to deposit again.
+      if (!hasSession && !forceWallet && (await tryResume())) hasSession = true;
 
       // Preferred: silent session payment (no popup) when a session is active.
       if (hasSession && !forceWallet) {
@@ -469,10 +504,11 @@ export default function ChunkReader(props: Props) {
       toast("warning", "Connect a wallet (or create your free one) to unlock this.");
       return;
     }
-    const hasSession = sessionActive || !!opts?.sessionReady;
+    let hasSession = sessionActive || !!opts?.sessionReady;
     setPaying(-1); // sentinel: whole-piece in flight (disables the per-block buttons)
     setError(null);
     try {
+      if (!hasSession && (await tryResume())) hasSession = true;
       if (!hasSession) {
         setPendingWhole(true);
         setShowSetup(true);
@@ -529,11 +565,12 @@ export default function ChunkReader(props: Props) {
   }
 
   return (
-    <div className={`mx-auto max-w-2xl px-margin-mobile py-stack-lg md:px-margin-desktop ${showWholeBar ? "pb-40 md:pb-32" : ""}`}>
+    <div className="mx-auto max-w-2xl px-margin-mobile py-stack-lg md:px-margin-desktop">
       <div className="mb-6 flex items-center justify-between gap-2">
         <Link href="/for-you" className="inline-flex h-11 items-center gap-1 font-label-caps text-label-caps text-outline hover:text-primary">
           ← For You
         </Link>
+        {/* Compact toolbar: the Reading-Fuel pill grouped with icon-only actions. */}
         <div className="flex items-center gap-1">
           {hasWallet && <ReadingFuel pricePerBlock={pricePerBlock} onTopUp={() => setShowSetup(true)} />}
           <ShareButton slug={slug} title={title} iconOnly />
@@ -564,9 +601,24 @@ export default function ChunkReader(props: Props) {
         {sessionActive && <span className="text-secondary">· one-tap on</span>}
       </div>
 
-      {summary && <p className="mb-8 border-l-2 border-outline-variant pl-4 font-body-lg text-on-surface-variant">{summary}</p>}
+      {summary && <p className="mb-6 border-l-4 border-outline-variant pl-4 font-body-lg text-on-surface-variant">{summary}</p>}
 
-      <div className="flex flex-col gap-6">
+      {/* Whole-piece upsell — the single place a price is shown. Skip the bulk
+          discount math for a one-block piece (nothing to discount). */}
+      {!allUnlocked && payable.length > 1 && hasWallet && (
+        <button
+          onClick={() => unlockWhole()}
+          disabled={paying !== null}
+          className="mb-8 flex w-full items-center justify-center gap-2 rounded-xl border border-primary/30 bg-primary/5 px-5 py-3 font-body-md text-primary transition-colors hover:bg-primary/10 disabled:opacity-60"
+        >
+          <span className="material-symbols-outlined text-[18px]">auto_stories</span>
+          {paying === -1
+            ? "Unlocking the whole piece…"
+            : `Unlock the whole ${isPicture ? "set" : "piece"} — ${formatUsdc(wholeDisplay)} USDC`}
+        </button>
+      )}
+
+      <div className="flex flex-col gap-4">
         {chunks.map((c) => {
           const text = c.isFree ? c.text : unlocked[c.blockIndex];
           const isUnlocked = text !== undefined && text !== null;
@@ -598,7 +650,7 @@ export default function ChunkReader(props: Props) {
               {isNext && (
                 <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-4 text-center">
                   {blocked ? (
-                    <div className="flex flex-col items-center gap-2 rounded-2xl border hairline bg-surface/70 px-5 py-4 backdrop-blur">
+                    <div className="flex flex-col items-center gap-2 rounded-2xl border border-outline-variant bg-surface/70 px-5 py-4 backdrop-blur">
                       <p className="font-body-sm text-[13px] text-error">
                         Your previous payment didn&apos;t go through. Resolve it to keep reading.
                       </p>
@@ -613,7 +665,7 @@ export default function ChunkReader(props: Props) {
                         <button
                           onClick={() => { setBlocked(false); setShowSetup(true); }}
                           disabled={paying !== null}
-                          className="rounded-full border hairline px-6 py-2.5 font-label-caps text-label-caps text-on-surface transition-colors hover:bg-on-surface/5 disabled:opacity-50"
+                          className="rounded-full border border-outline-variant px-6 py-2.5 font-label-caps text-label-caps text-on-surface transition-colors hover:bg-surface-container-low disabled:opacity-50"
                         >
                           Add funds
                         </button>
@@ -625,7 +677,7 @@ export default function ChunkReader(props: Props) {
                       Checking your wallet…
                     </span>
                   ) : !hasWallet ? (
-                    <div className="flex flex-col items-center gap-2 rounded-2xl border hairline bg-surface/70 px-5 py-4 backdrop-blur">
+                    <div className="flex flex-col items-center gap-2 rounded-2xl border border-outline-variant bg-surface/70 px-5 py-4 backdrop-blur">
                       {canCreateEmbedded && (
                         <button
                           onClick={() => createWalletThenUnlock(c.blockIndex)}
@@ -651,11 +703,11 @@ export default function ChunkReader(props: Props) {
                       </span>
                       {/* Platform-wide rule: the unlock CTA always reads "Read on" —
                           never the price. A pill floating dead-center over the blur,
-                          lifted off the page with a subtle shadow. */}
+                          lifted off the page with a subtle shadow + backdrop-blur. */}
                       <button
                         onClick={() => unlock(c.blockIndex)}
                         disabled={paying !== null}
-                        className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-primary px-8 py-3 font-label-caps text-label-caps text-on-primary shadow-lg shadow-primary/20 ring-1 ring-black/5 transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
+                        className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-primary px-8 py-3 font-label-caps text-label-caps text-on-primary shadow-lg shadow-primary/20 ring-1 ring-black/5 backdrop-blur transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
                       >
                         {paying === c.blockIndex
                           ? sessionActive ? "Unlocking…" : walletKind === "embedded" ? "Setting up…" : "Confirm in wallet…"
@@ -685,26 +737,6 @@ export default function ChunkReader(props: Props) {
         <div className="mt-8 flex items-center justify-center gap-2 rounded-xl border border-secondary/30 bg-secondary/5 p-6 text-center font-body-md text-secondary">
           <span className="material-symbols-outlined text-[20px]">check_circle</span>
           Fully unlocked — every block paid the creator directly.
-        </div>
-      )}
-
-      {/* Sticky bottom bar — the whole-piece upsell (the single place a price is
-          shown). Spans the text column, backdrop-blurred to feel integrated, and
-          clears the mobile bottom nav (bottom-14) + home-indicator safe area. */}
-      {showWholeBar && (
-        <div className="fixed inset-x-0 bottom-14 z-40 border-t hairline bg-surface/80 backdrop-blur md:bottom-0">
-          <div className="mx-auto max-w-2xl px-margin-mobile py-3 pb-safe md:px-margin-desktop">
-            <button
-              onClick={() => unlockWhole()}
-              disabled={paying !== null}
-              className="flex min-h-[44px] w-full items-center justify-center gap-2 rounded-full bg-primary px-5 py-3 font-label-caps text-label-caps text-on-primary shadow-sm transition-all hover:opacity-90 active:scale-[0.99] disabled:opacity-50"
-            >
-              <span className="material-symbols-outlined text-[18px]">auto_stories</span>
-              {paying === -1
-                ? "Unlocking the whole piece…"
-                : `Unlock the whole ${isPicture ? "set" : "piece"} — ${formatUsdc(wholeDisplay)} USDC`}
-            </button>
-          </div>
         </div>
       )}
 
