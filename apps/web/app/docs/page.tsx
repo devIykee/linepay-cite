@@ -1,6 +1,11 @@
 import Link from "next/link";
 
-export const metadata = { title: "Docs · Skimflow" };
+export const metadata = {
+  title: "Docs",
+  description:
+    "How Skimflow works: publish articles, serialized books, picture stories, or AI agent skills and earn USDC every time someone unlocks a block. Built for people and autonomous agents.",
+  alternates: { canonical: "/docs" },
+};
 
 function Code({ children, lang }: { children: string; lang?: string }) {
   return (

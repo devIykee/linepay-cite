@@ -1,8 +1,9 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Terms of Service · Skimflow",
+  title: "Terms of Service",
   description: "The terms governing use of Skimflow: payments, refunds, reporting, content, and revenue split.",
+  alternates: { canonical: "/terms" },
 };
 
 // NOTE: This is a product-accurate DRAFT, not legal advice. It must be reviewed

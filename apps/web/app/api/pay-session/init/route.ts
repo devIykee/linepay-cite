@@ -1,13 +1,13 @@
 import { NextRequest } from "next/server";
 import { getAddress, verifyMessage } from "viem";
 import type { Address, Hex } from "viem";
-import { createPaySession } from "@/lib/store";
+import { createPaySession, getActivePaySession } from "@/lib/store";
 import { currentSession } from "@/lib/session";
 import { getUserById } from "@/lib/store";
 import { validateWallet } from "@/lib/validate-wallet";
-import { normalizeUsdc } from "@/lib/money";
+import { normalizeUsdc, toBaseUnits, toDecimal } from "@/lib/money";
 import { paySessionAuthMessage } from "@/lib/burn-intent";
-import { relayerRecipient } from "@/lib/gateway-relayer";
+import { relayerRecipient, gatewayBalance } from "@/lib/gateway-relayer";
 import { PAY_SESSION_COOKIE, signPaySession } from "@/lib/session-key";
 
 export const runtime = "nodejs";
@@ -82,12 +82,37 @@ export async function POST(req: NextRequest) {
         return Response.json({ error: "bad_signature", friendly: "Authorization signature didn't verify." }, { status: 401 });
     }
 
-    const session = await createPaySession({ mainWallet, sessionAddress, cap });
+    // The reading-fuel cap should reflect the TOTAL spendable balance, not just
+    // the amount the user typed this time — otherwise a top-up looks like it
+    // erased the old balance, and funds deposited elsewhere are ignored.
+    const live = (process.env.PAYMENTS_MODE ?? "simulate").toLowerCase() === "live";
+    let totalCap = cap;
+    if (live) {
+      // On-chain Gateway balance is the real spendable total: it already
+      // includes any prior balance plus funds just deposited (by this or any
+      // other app). Use it so the gauge mirrors reality and top-ups add up.
+      try {
+        const onChain = await gatewayBalance(mainWallet);
+        if (onChain > 0n) totalCap = toDecimal(onChain);
+      } catch {
+        /* RPC hiccup — fall back to the requested amount below */
+      }
+    } else {
+      // Simulate has no on-chain balance, so carry over the prior session's
+      // unspent remainder: a top-up adds to existing fuel instead of replacing it.
+      const prior = await getActivePaySession(mainWallet);
+      if (prior) {
+        const priorRemaining = toBaseUnits(prior.cap) - toBaseUnits(prior.spent);
+        if (priorRemaining > 0n) totalCap = toDecimal(toBaseUnits(cap) + priorRemaining);
+      }
+    }
+
+    const session = await createPaySession({ mainWallet, sessionAddress, cap: totalCap });
     const token = await signPaySession({
       sessionId: session.id,
       mainWallet,
       sessionAddress,
-      cap,
+      cap: totalCap,
     });
 
     const res = Response.json({
@@ -95,9 +120,9 @@ export async function POST(req: NextRequest) {
       sessionId: session.id,
       sessionAddress,
       mainWallet,
-      cap,
+      cap: totalCap,
       spent: session.spent,
-      remaining: cap,
+      remaining: totalCap,
       recipient: getAddress(relayerRecipient()),
     });
     res.headers.append(

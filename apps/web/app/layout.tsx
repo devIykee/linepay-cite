@@ -10,16 +10,20 @@ import ThemeToggle from "@/components/ThemeToggle";
 import Logo from "@/components/Logo";
 
 const SITE_NAME = "Skimflow";
-const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://skimflow-ten.vercel.app").replace(/\/$/, "");
+const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://skimflow.vercel.app").replace(/\/$/, "");
 const SITE_TAGLINE = "Skimflow: pay-per-block reading for people and AI agents";
 const SITE_DESCRIPTION =
   "Publish articles, serialized books, and picture stories (or AI agent skills) and earn USDC every time someone unlocks a block. Read the free preview, then tap to read on: frictionless micro-payments on Arc for humans and autonomous agents alike, powered by x402 + Circle Gateway.";
 
 export const metadata: Metadata = {
   metadataBase: new URL(SITE_URL),
-  title: SITE_TAGLINE,
+  // `%s · Skimflow` for child pages; the home page overrides with an absolute title.
+  title: { default: SITE_TAGLINE, template: "%s · Skimflow" },
   description: SITE_DESCRIPTION,
   applicationName: SITE_NAME,
+  // Set NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION in the env to verify ownership in
+  // Google Search Console via the meta-tag method (no tag emitted if unset).
+  verification: { google: process.env.NEXT_PUBLIC_GOOGLE_SITE_VERIFICATION },
   keywords: [
     "pay-per-block",
     "micropayments",

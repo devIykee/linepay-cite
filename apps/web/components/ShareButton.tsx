@@ -21,7 +21,7 @@ export default function ShareButton({ slug, title, iconOnly = false }: { slug: s
 
   function buildUrl(): string {
     const origin = typeof window !== "undefined" ? window.location.origin : "";
-    const url = new URL(`/read/${slug}`, origin || "https://skimflow-ten.vercel.app");
+    const url = new URL(`/read/${slug}`, origin || "https://skimflow.vercel.app");
     url.searchParams.set("ref", session!.user!.id);
     return url.toString();
   }

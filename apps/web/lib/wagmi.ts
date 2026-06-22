@@ -47,7 +47,7 @@ export const arcTestnet = defineChain({
  * the wallet state hydrates correctly.
  */
 // Shown in the wallet app during a WalletConnect (mobile QR / deep-link) connect.
-const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://skimflow-ten.vercel.app";
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://skimflow.vercel.app";
 
 export const wagmiConfig = getDefaultConfig({
   appName: "Skimflow",

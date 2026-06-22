@@ -813,6 +813,7 @@ export default function ChunkReader(props: Props) {
           mainWallet={effectiveWallet}
           kind={walletKind}
           suggestedCap={Math.max(Number(pricePerBlock) * payable.length, Number(pricePerBlock) * 5)}
+          isTopUp={sessionActive}
           onReady={onSessionReady}
           onClose={() => {
             setShowSetup(false);

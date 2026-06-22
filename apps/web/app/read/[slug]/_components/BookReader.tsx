@@ -660,6 +660,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
           mainWallet={effectiveWallet}
           kind={walletKind}
           suggestedCap={Math.max(Number(wholeDisplay), Number(pricePerBlock) * 5)}
+          isTopUp={sessionActive}
           onReady={onSessionReady}
           onClose={() => {
             setShowSetup(false);

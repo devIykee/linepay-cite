@@ -602,6 +602,20 @@ export function listPublished(f: MarketplaceFilters = {}): Promise<ContentWithCr
   );
 }
 
+/** Lightweight list of published content for the XML sitemap (slug + lastmod). */
+export function listSitemapContent(): Promise<
+  { slug: string; updated_at: Date; published_at: Date | null }[]
+> {
+  return query(
+    `SELECT slug, updated_at, published_at
+     FROM content
+     WHERE status = 'published'
+     ORDER BY published_at DESC NULLS LAST
+     LIMIT 5000`,
+    []
+  );
+}
+
 export interface SearchResult {
   id: string;
   slug: string;
