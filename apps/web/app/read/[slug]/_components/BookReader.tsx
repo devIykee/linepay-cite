@@ -45,11 +45,16 @@ const SWIPE_THRESHOLD = 50;
  */
 export default function BookReader({ slug, title, creatorHandle, pricePerBlock, chapters, pages }: Props) {
   const storageKey = `skimflow_reader_${slug}`;
+  const posKey = `skimflow_reader_pos_${slug}`;
+  const bookmarksKey = `skimflow_reader_bookmarks_${slug}`;
   const [unlocked, setUnlocked] = useState<Record<number, string>>({});
   const [current, setCurrent] = useState(0);
   const [chromeVisible, setChromeVisible] = useState(true);
   const [chapterListOpen, setChapterListOpen] = useState(false);
+  const [bookmarksOpen, setBookmarksOpen] = useState(false);
+  const [bookmarks, setBookmarks] = useState<number[]>([]); // bookmarked blockIndexes
   const [paying, setPaying] = useState<number | null>(null);
+  const hydratedRef = useRef(false);
 
   const [sessionActive, setSessionActive] = useState(false);
   const [showSetup, setShowSetup] = useState(false);
@@ -67,15 +72,69 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
 
   const touchStartX = useRef<number | null>(null);
 
-  // Hydrate unlocked pages + lock body scroll while the overlay is open.
+  // Hydrate unlocked pages, bookmarks, and the saved reading position.
   useEffect(() => {
+    let savedUnlocked: Record<number, string> = {};
     try {
       const saved = localStorage.getItem(storageKey);
-      if (saved) setUnlocked(JSON.parse(saved));
+      if (saved) savedUnlocked = JSON.parse(saved);
     } catch {
       /* ignore */
     }
-  }, [storageKey]);
+    setUnlocked(savedUnlocked);
+    try {
+      const bm = localStorage.getItem(bookmarksKey);
+      if (bm) setBookmarks(JSON.parse(bm));
+    } catch {
+      /* ignore */
+    }
+    try {
+      const p = localStorage.getItem(posKey);
+      if (p != null && p !== "") {
+        const idx = Number(p);
+        // Only resume onto a reachable page (free or already paid), so resuming
+        // never lands on a locked page and silently triggers a payment.
+        if (Number.isFinite(idx) && idx > 0 && idx < pages.length) {
+          const pg = pages[idx];
+          if (pg.isFree || savedUnlocked[pg.blockIndex] !== undefined) {
+            setCurrent(idx);
+            toast("info", "Resumed where you left off.");
+          }
+        }
+      }
+    } catch {
+      /* ignore */
+    }
+    hydratedRef.current = true;
+    // Keys are derived from the (stable) slug; run once on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Persist the reading position as the reader turns pages.
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    try {
+      localStorage.setItem(posKey, String(current));
+    } catch {
+      /* ignore quota */
+    }
+  }, [current, posKey]);
+
+  function toggleBookmark() {
+    const p = pages[current];
+    if (!p) return;
+    setBookmarks((bm) => {
+      const has = bm.includes(p.blockIndex);
+      const next = has ? bm.filter((b) => b !== p.blockIndex) : [...bm, p.blockIndex].sort((a, b) => a - b);
+      try {
+        localStorage.setItem(bookmarksKey, JSON.stringify(next));
+      } catch {
+        /* ignore quota */
+      }
+      toast("info", has ? "Bookmark removed." : "Bookmarked this page.");
+      return next;
+    });
+  }
 
   useEffect(() => {
     const prev = document.body.style.overflow;
@@ -219,7 +278,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
       throw new Error(d.friendly ?? d.error ?? "Payment failed.");
     } catch (e) {
       const msg = String((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? e);
-      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Payment cancelled — nothing was charged.");
+      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Payment cancelled. Nothing was charged.");
       else toast("error", msg, "Payment failed");
     } finally {
       setPaying(null);
@@ -299,7 +358,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
         for (const [k, v] of Object.entries(d.texts as Record<string, string>)) merged[Number(k)] = v;
         persist(merged);
         window.dispatchEvent(new Event(PAY_SESSION_EVENT));
-        toast("success", "Unlocked the whole book — enjoy.");
+        toast("success", "Unlocked the whole book. Enjoy.");
         return;
       }
       if (res.status === 401 || d.error === "no_pay_session") {
@@ -311,7 +370,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
       throw new Error(d.friendly ?? d.error ?? "Couldn't unlock the book.");
     } catch (e) {
       const msg = String((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? e);
-      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Payment cancelled — nothing was charged.");
+      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Payment cancelled. Nothing was charged.");
       else toast("error", msg, "Couldn't unlock the book");
     } finally {
       setPaying(null);
@@ -336,7 +395,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
   async function createWallet() {
     try {
       await embedded.provision();
-      toast("success", "Wallet created — you can keep reading now.");
+      toast("success", "Wallet created. You can keep reading now.");
     } catch (e) {
       const msg = String((e as { message?: string })?.message ?? e);
       if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Wallet setup cancelled.");
@@ -365,6 +424,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
 
   const currentPage = pages[current];
   const currentChapter = currentPage?.chapterId ? chapterById.get(currentPage.chapterId) : undefined;
+  const currentBookmarked = currentPage ? bookmarks.includes(currentPage.blockIndex) : false;
 
   return (
     <div className="fixed inset-0 z-[60] flex flex-col bg-surface text-on-surface">
@@ -381,7 +441,20 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
           {title}
           {currentChapter && <span className="ml-2 font-body-sm text-[12px] text-on-surface-variant">· {currentChapter.title}</span>}
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1">
+          <button
+            onClick={toggleBookmark}
+            aria-label={currentBookmarked ? "Remove bookmark" : "Bookmark this page"}
+            aria-pressed={currentBookmarked}
+            title={currentBookmarked ? "Remove bookmark" : "Bookmark this page"}
+            className={`inline-flex h-9 w-9 items-center justify-center rounded-full transition-colors hover:bg-on-surface/5 ${
+              currentBookmarked ? "text-primary" : "text-on-surface-variant"
+            }`}
+          >
+            <span className={`material-symbols-outlined text-[20px] ${currentBookmarked ? "[font-variation-settings:'FILL'_1]" : ""}`}>
+              bookmark
+            </span>
+          </button>
           {hasWallet && <ReadingFuel pricePerBlock={pricePerBlock} onTopUp={() => setShowSetup(true)} />}
         </div>
       </div>
@@ -455,18 +528,24 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
             className="flex w-full items-center justify-center gap-2 rounded-lg border border-primary/30 bg-primary/5 px-4 py-2 font-body-sm text-primary hover:bg-primary/10 disabled:opacity-60"
           >
             <span className="material-symbols-outlined text-[16px]">auto_stories</span>
-            Unlock the whole book — {formatUsdc(wholeDisplay)} USDC
+            Unlock the whole book for {formatUsdc(wholeDisplay)} USDC
           </button>
         )}
         <div className="flex items-center justify-between gap-3 font-body-sm text-[12px] text-on-surface-variant">
-          <button onClick={() => setChapterListOpen((o) => !o)} className="inline-flex items-center gap-1 hover:text-primary">
-            <span className="material-symbols-outlined text-[16px]">list</span>
-            Chapters
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={() => { setChapterListOpen((o) => !o); setBookmarksOpen(false); }} className="inline-flex items-center gap-1 hover:text-primary">
+              <span className="material-symbols-outlined text-[16px]">list</span>
+              Chapters
+            </button>
+            <button onClick={() => { setBookmarksOpen((o) => !o); setChapterListOpen(false); }} className="inline-flex items-center gap-1 hover:text-primary">
+              <span className="material-symbols-outlined text-[16px]">bookmarks</span>
+              {bookmarks.length > 0 ? bookmarks.length : ""} Bookmarks
+            </button>
+          </div>
           <span className="font-data-mono">
             Page {current + 1} of {pages.length}
           </span>
-          <span className="text-outline">by @{creatorHandle ?? "unknown"}</span>
+          <span className="hidden text-outline sm:inline">by @{creatorHandle ?? "unknown"}</span>
         </div>
         {/* Progress rail */}
         <div className="h-1 w-full overflow-hidden rounded-full bg-outline-variant/40">
@@ -509,6 +588,69 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
                 );
               })}
             </ul>
+          </div>
+        </div>
+      )}
+
+      {/* ── Bookmarks drawer ───────────────────────────────────────────────── */}
+      {bookmarksOpen && (
+        <div className="absolute inset-0 z-40 flex" onClick={() => setBookmarksOpen(false)}>
+          <div
+            className="ml-auto h-full w-72 max-w-[80vw] overflow-y-auto border-l border-outline-variant bg-surface p-4 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <h3 className="mb-3 font-headline-sm text-[16px]">Bookmarks</h3>
+            {bookmarks.length === 0 ? (
+              <p className="font-body-sm text-[13px] text-on-surface-variant">
+                No bookmarks yet. Tap the bookmark icon at the top to save a page.
+              </p>
+            ) : (
+              <ul className="flex flex-col gap-1">
+                {bookmarks.map((bi) => {
+                  const pageIdx = pages.findIndex((p) => p.blockIndex === bi);
+                  if (pageIdx < 0) return null;
+                  const p = pages[pageIdx];
+                  const ch = p.chapterId ? chapterById.get(p.chapterId) : undefined;
+                  const reachable = isPageUnlocked(p);
+                  return (
+                    <li key={bi} className="flex items-center gap-1">
+                      <button
+                        onClick={() => {
+                          setBookmarksOpen(false);
+                          if (reachable) turnTo(bi);
+                          else void payPage(bi);
+                        }}
+                        className="flex flex-1 items-center justify-between gap-2 rounded-lg px-3 py-2 text-left font-body-sm text-[13px] hover:bg-surface-container-low"
+                      >
+                        <span className="truncate">
+                          <span className="text-outline">Page {pageIdx + 1}</span>
+                          {ch && <span className="text-on-surface-variant"> · {ch.title || "Untitled"}</span>}
+                        </span>
+                        {!reachable && <span className="material-symbols-outlined text-[15px] text-outline">lock</span>}
+                      </button>
+                      <button
+                        onClick={() =>
+                          setBookmarks((bm) => {
+                            const next = bm.filter((b) => b !== bi);
+                            try {
+                              localStorage.setItem(bookmarksKey, JSON.stringify(next));
+                            } catch {
+                              /* ignore quota */
+                            }
+                            return next;
+                          })
+                        }
+                        aria-label="Remove bookmark"
+                        title="Remove bookmark"
+                        className="shrink-0 text-outline hover:text-error"
+                      >
+                        <span className="material-symbols-outlined text-[18px]">close</span>
+                      </button>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
           </div>
         </div>
       )}

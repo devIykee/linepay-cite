@@ -197,7 +197,7 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
       const account = getOrCreateSessionAccount(mainWallet);
 
       if (LIVE) {
-        toast("info", embedded ? "Quick one-time setup — confirm each step with your PIN." : "Quick one-time setup — confirm each step in your wallet.");
+        toast("info", embedded ? "Quick one-time setup. Confirm each step with your PIN." : "Quick one-time setup. Confirm each step in your wallet.");
         if (embedded) await runEmbeddedSetup(account.address, parseUnits(cap, 6));
         else await runExternalSetup(account.address, parseUnits(cap, 6));
       }
@@ -206,7 +206,7 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
       let signature: string | undefined;
       if (!embedded) {
         const message = paySessionAuthMessage({ mainWallet, sessionAddress: account.address, cap });
-        toast("info", LIVE ? "Final step: unlock one-tap reading." : "Confirm once to turn on one-tap reading — no funds move.");
+        toast("info", LIVE ? "Final step: unlock one-tap reading." : "Confirm once to turn on one-tap reading. No funds move.");
         signature = await signMessageAsync({ message });
       }
 
@@ -224,7 +224,7 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
       const data = await res.json();
       if (!res.ok || !data.ok) throw new Error(data.friendly ?? data.error ?? "Setup failed.");
 
-      toast("success", `You're topped up — ${formatUsdc(data.cap)} USDC of reading fuel, no more interruptions.`);
+      toast("success", `You're topped up: ${formatUsdc(data.cap)} USDC of reading fuel, no more interruptions.`);
       onReady(data as PaySessionInfo);
     } catch (e) {
       const msg = String((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? e);
@@ -249,9 +249,9 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
         <p className="mb-5 font-body-sm text-on-surface-variant">
           {LIVE
             ? embedded
-              ? "A quick one-time setup adds the amount you choose to your reading balance and turns on one-tap reading with your PIN. After that, each block unlocks instantly — no PIN per block."
-              : "A quick one-time setup adds the amount you choose to your reading balance and turns on one-tap reading. After that, each block unlocks instantly — no wallet popup per block."
-            : "Confirm once to turn on one-tap reading. After that, each block unlocks instantly — no wallet popup per block."}{" "}
+              ? "A quick one-time setup adds the amount you choose to your reading balance and turns on one-tap reading with your PIN. After that, each block unlocks instantly, no PIN per block."
+              : "A quick one-time setup adds the amount you choose to your reading balance and turns on one-tap reading. After that, each block unlocks instantly, no wallet popup per block."
+            : "Confirm once to turn on one-tap reading. After that, each block unlocks instantly, no wallet popup per block."}{" "}
           You stay in control: it stops at your cap, and you can end it anytime.
         </p>
 

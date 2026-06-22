@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 export const metadata: Metadata = {
-  title: "Terms of Service — Skimflow",
+  title: "Terms of Service · Skimflow",
   description: "The terms governing use of Skimflow: payments, refunds, reporting, content, and revenue split.",
 };
 
@@ -26,12 +26,12 @@ export default function TermsPage() {
   return (
     <div className="mx-auto max-w-3xl px-margin-mobile py-stack-lg md:px-margin-desktop">
       <h1 className="mb-2 font-display-lg text-display-lg-mobile md:text-display-lg">Terms of Service</h1>
-      <p className="mb-6 font-body-sm text-body-sm text-outline">Last updated: draft — pending legal review.</p>
+      <p className="mb-6 font-body-sm text-body-sm text-outline">Last updated: draft, pending legal review.</p>
 
       <div className="mb-8 rounded-xl border border-primary/40 bg-primary/5 p-4">
         <div className="mb-1 flex items-center gap-2 font-label-lg text-primary">
           <span className="material-symbols-outlined text-[18px]">gavel</span>
-          Draft — not yet legally binding
+          Draft: not yet legally binding
         </div>
         <p className="font-body-sm text-body-sm text-on-surface-variant">
           This document is a starting draft that reflects how Skimflow works. It has not been reviewed by a lawyer and
@@ -67,7 +67,7 @@ export default function TermsPage() {
         <p>
           Completed unlocks are generally <strong>non-refundable</strong>. The one exception: if a paid Skim-Flow image
           becomes unavailable because its externally-hosted link is dead or unshared, you may file a report (see below)
-          for review. Resolution — refund, credit, or otherwise — is at the platform&apos;s discretion following that
+          for review. Resolution (refund, credit, or otherwise) is at the platform&apos;s discretion following that
           review. Filing a report does not guarantee a refund; it guarantees the issue is reviewed.
         </p>
       </Section>
@@ -100,8 +100,8 @@ export default function TermsPage() {
 
       <Section n="7" title="Creator responsibilities">
         <p>
-          Creators are responsible for ensuring the content they publish or import — including Medium-imported and
-          GitHub-imported content — is their own or appropriately licensed, and for the accuracy of any Agent Skill they
+          Creators are responsible for ensuring the content they publish or import (including Medium-imported and
+          GitHub-imported content) is their own or appropriately licensed, and for the accuracy of any Agent Skill they
           publish. Creators must hold a valid payout wallet to publish.
         </p>
       </Section>

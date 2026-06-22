@@ -32,7 +32,7 @@ export default function ReportButton({ contentSlug, iconOnly = false }: { conten
         body: JSON.stringify({ reportType: "content_report", reason, detail, contentSlug }),
       });
       if (!res.ok) throw new Error();
-      toast("success", "Thanks — this report has been sent to our team for review.");
+      toast("success", "Thanks. This report has been sent to our team for review.");
       setOpen(false);
       setDetail("");
     } catch {

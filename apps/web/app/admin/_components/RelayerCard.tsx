@@ -49,7 +49,7 @@ export default function RelayerCard() {
         </div>
         {r.lowBalance && (
           <span className="flex items-center gap-1 font-label-caps text-label-caps text-primary">
-            <span className="material-symbols-outlined text-[15px]">warning</span>low — top up
+            <span className="material-symbols-outlined text-[15px]">warning</span>low, top up
           </span>
         )}
       </div>

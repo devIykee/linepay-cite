@@ -193,7 +193,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: strin
       price: content.price_per_block,
       payTo,
       resource,
-      description: `Unlock block ${blockIndex} of "${content.title}" — ${content.price_per_block} USDC.`,
+      description: `Unlock block ${blockIndex} of "${content.title}" for ${content.price_per_block} USDC.`,
       blockIndex,
       extraHeaders: rateLimitHeaders(rl),
     },

@@ -79,7 +79,7 @@ export default function ProfileSettings({ initial, impersonating }: { initial: I
 
       {impersonating && (
         <p className="mb-4 rounded-lg border border-primary/30 bg-primary/5 p-3 font-body-sm text-primary">
-          Read-only while impersonating — profile changes are disabled.
+          Read-only while impersonating. Profile changes are disabled.
         </p>
       )}
 

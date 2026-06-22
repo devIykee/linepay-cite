@@ -77,7 +77,7 @@ export default function PayoutWallet() {
           {active && <span className="pill ml-2 text-[10px]">{emb.walletSource}</span>}
         </p>
         <p className="mt-1 font-body-sm text-[11px] text-outline">
-          Switching only affects future payments — past and in-flight payouts keep their original destination.
+          Switching only affects future payments. Past and in-flight payouts keep their original destination.
         </p>
       </div>
 

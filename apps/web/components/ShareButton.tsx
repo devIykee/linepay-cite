@@ -46,9 +46,9 @@ export default function ShareButton({ slug, title, iconOnly = false }: { slug: s
     }
     try {
       await navigator.clipboard.writeText(url);
-      toast("success", "Referral link copied — you'll earn the referrer cut when people read.");
+      toast("success", "Referral link copied. You'll earn the referrer cut when people read.");
     } catch {
-      toast("error", "Couldn't copy the link — copy it from the address bar.");
+      toast("error", "Couldn't copy the link. Copy it from the address bar.");
     }
   }
 

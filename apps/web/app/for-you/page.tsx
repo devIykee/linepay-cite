@@ -126,9 +126,9 @@ export default function ForYouPage() {
         let rows = raw;
         if (searching) {
           // Search hits all types; keep the active tab's content. "All" mixes
-          // human content (articles + posts) but never agent skills or books.
+          // human-readable content (articles, posts, books) but never agent skills.
           rows = rows.filter((r) =>
-            tab === "all" ? r.contentType !== "agent-skills" && r.contentType !== "book" : r.contentType === tab
+            tab === "all" ? r.contentType !== "agent-skills" : r.contentType === tab
           );
         }
         if (verifiedOnly && !searching) rows = rows.filter((r) => r.creatorVerified);
@@ -407,7 +407,7 @@ function EmptyState({ tab, q }: { tab: TabKey; q: string }) {
         <span className="material-symbols-outlined text-[28px] text-primary">menu_book</span>
         <h3 className="font-headline-sm text-headline-sm">No books yet</h3>
         <p className="max-w-md font-body-sm text-body-sm text-on-surface-variant">
-          Long-form, serialized reads — pay as you turn the page. Creators can publish one from the dashboard.
+          Long-form, serialized reads. Pay as you turn the page. Creators can publish one from the dashboard.
         </p>
       </div>
     );
@@ -418,14 +418,14 @@ function EmptyState({ tab, q }: { tab: TabKey; q: string }) {
         <span className="material-symbols-outlined text-[28px] text-primary">collections</span>
         <h3 className="font-headline-sm text-headline-sm">No Skim-Flows yet</h3>
         <p className="max-w-md font-body-sm text-body-sm text-on-surface-variant">
-          Skim-Flow posts — pay-per-image picture sequences — show up here. Creators can publish one from the dashboard.
+          Skim-Flow posts (pay-per-image picture sequences) show up here. Creators can publish one from the dashboard.
         </p>
       </div>
     );
   }
   return (
     <div className="mt-2 rounded-xl border border-outline-variant bg-surface-container-lowest p-8 text-center">
-      <p className="font-body-md text-on-surface-variant">Nothing here yet — check back soon.</p>
+      <p className="font-body-md text-on-surface-variant">Nothing here yet. Check back soon.</p>
     </div>
   );
 }

@@ -13,6 +13,7 @@ const nextConfig = {
   async rewrites() {
     return [
       { source: "/.well-known/agent-payment.json", destination: "/api/well-known/agent-payment" },
+      { source: "/.well-known/agent-skills.json", destination: "/api/well-known/agent-skills" },
     ];
   },
   webpack: (config) => {

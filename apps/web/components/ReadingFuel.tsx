@@ -43,7 +43,7 @@ export default function ReadingFuel({ pricePerBlock, onTopUp }: Props) {
         const lowAt = pricePerBlock ? Number(pricePerBlock) * 2 : 0.01;
         if (remaining <= lowAt && !warnedRef.current) {
           warnedRef.current = true;
-          toast("warning", "Your reading fuel is running low — add funds to keep flowing without interruptions.");
+          toast("warning", "Your reading fuel is running low. Add funds to keep flowing without interruptions.");
         }
         if (remaining > lowAt) warnedRef.current = false;
       }
@@ -70,7 +70,7 @@ export default function ReadingFuel({ pricePerBlock, onTopUp }: Props) {
       // the reader can silently resume against the still-funded Gateway balance
       // on the next "Read on" — without depositing again.
       setState({ active: false });
-      toast("info", "Reading session ended — your balance stays put if you read on again.");
+      toast("info", "Reading session ended. Your balance stays put if you read on again.");
       window.dispatchEvent(new Event(PAY_SESSION_EVENT));
     } catch {
       toast("error", "Couldn't end the session.");

@@ -70,6 +70,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
       simulateFail?: boolean;
     };
     const blockIndex = Math.max(0, Number(body.blockIndex ?? 0));
+    // Whole-piece requests carry no blockIndex, so it defaults to 0 — the always
+    // -free first block. Detect it here so the free-block short-circuit below
+    // doesn't swallow the whole-piece quote/settle (which prices every payable
+    // block, not block 0).
+    const wantsWhole = body.whole === true;
 
     const content = await getContentWithCreator(slug);
     if (!content) return Response.json({ error: "content_not_found", friendly: "This content no longer exists." }, { status: 404 });
@@ -79,7 +84,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
 
     const chunk = await getChunk(content.id, blockIndex);
     if (!chunk) return Response.json({ error: "block_not_found" }, { status: 404 });
-    if (chunk.is_free) {
+    if (chunk.is_free && !wantsWhole) {
       return Response.json({ free: true, blockIndex, text: chunk.text });
     }
 
@@ -97,7 +102,6 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ slug: stri
     // Whole-piece pricing is server-authoritative: the count + discount are read
     // from the DB here and recomputed identically on settle, so a tampered client
     // can never underpay (the burn intent value must equal `wholeAmount`).
-    const wantsWhole = body.whole === true;
     const wholeQuote = async () => {
       const count = await payableChunkCount(content.id);
       const decimal = wholePiecePrice(content.price_per_block, count);

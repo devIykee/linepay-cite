@@ -15,7 +15,7 @@ const STEPS = [
 ];
 
 const FEATURES = [
-  { icon: "edit_note", title: "Per-line pricing", body: "Monetize at the granular level. Readers and agents pay micro-amounts for exactly the lines they consume — from $0.000001 up." },
+  { icon: "edit_note", title: "Per-line pricing", body: "Monetize at the granular level. Readers and agents pay micro-amounts for exactly the lines they consume, from $0.000001 up." },
   { icon: "smart_toy", title: "Agents welcome", body: "Built for the machine age. Autonomous agents discover your work and pay the required nanopayment instantly to cite it." },
   { icon: "payments", title: "Automatic 85/10/5 splits", body: "Revenue is distributed in real time: 85% to you, 10% to the platform, 5% to the referrer. Transparent and on-chain." },
 ];
@@ -33,7 +33,7 @@ export default async function Home() {
             Get paid every time someone reads a line of your story.
           </h1>
           <p className="mx-auto max-w-2xl font-body-lg text-body-lg text-on-surface-variant">
-            Your readers pay per line — agents welcome. Value too small to have been worth moving before:
+            Your readers pay per line. Agents welcome. Value too small to have been worth moving before:
             per line, per citation, settled instantly as USDC on Arc through Circle Gateway.
           </p>
           <div className="flex flex-col items-center justify-center gap-gutter pt-stack-md sm:flex-row">
@@ -105,7 +105,7 @@ export default async function Home() {
         <div className="mx-auto max-w-2xl space-y-stack-md">
           <h2 className="font-headline-md text-headline-md">Make the smallest unit sellable.</h2>
           <p className="mb-stack-lg font-body-md text-body-md text-on-surface-variant">
-            Put a line behind Skimflow and every reader — human or agent — pays you for it.
+            Put a line behind Skimflow and every reader (human or agent) pays you for it.
           </p>
           <div className="flex justify-center gap-gutter pt-stack-md">
             <Link href="/dashboard" className="btn-primary px-12 py-4 !text-body-lg editorial-shadow">Start Writing</Link>

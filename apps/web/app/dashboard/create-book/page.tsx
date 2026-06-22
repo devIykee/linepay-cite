@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/Toaster";
@@ -10,6 +10,28 @@ import { normalizeImageUrl, isLikelyImageUrl } from "@/lib/image-links";
 interface ChapterDraft {
   title: string;
   body: string;
+}
+
+/**
+ * Local-only autosave snapshot. This is a same-device crash/exit safety net —
+ * NOT synced to the backend. "Save draft" / "Publish book" are the deliberate,
+ * cross-device persistence actions; a successful one clears this snapshot.
+ */
+interface BookDraftSnapshot {
+  v: number;
+  title: string;
+  coverImageUrl: string;
+  description: string;
+  price: string;
+  chapters: ChapterDraft[];
+  savedAt: number;
+}
+const AUTOSAVE_KEY = "skimflow:create-book:autosave";
+const AUTOSAVE_VERSION = 1;
+
+/** Only treat a snapshot as worth keeping/restoring if it has real content. */
+function snapshotHasContent(s: { title: string; description: string; chapters: ChapterDraft[] }) {
+  return Boolean(s.title.trim() || s.description.trim() || s.chapters.some((c) => c.body.trim()));
 }
 
 /**
@@ -29,8 +51,76 @@ export default function CreateBookPage() {
   const [chapters, setChapters] = useState<ChapterDraft[]>([{ title: "Chapter 1", body: "" }]);
   const [busy, setBusy] = useState(false);
 
+  // Autosave plumbing. `restorable` holds a found-on-load snapshot awaiting the
+  // user's restore/discard decision; `ready` gates the autosave writer so it
+  // never overwrites that snapshot before the user chooses.
+  const [restorable, setRestorable] = useState<BookDraftSnapshot | null>(null);
+  const [ready, setReady] = useState(false);
+
   const pageCounts = useMemo(() => chapters.map((ch) => splitPages(ch.body).length), [chapters]);
   const totalPages = pageCounts.reduce((a, b) => a + b, 0);
+
+  function clearAutosave() {
+    try { localStorage.removeItem(AUTOSAVE_KEY); } catch { /* ignore */ }
+  }
+
+  // On load, surface any local autosave from a prior session (don't auto-apply).
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(AUTOSAVE_KEY);
+      if (raw) {
+        const snap = JSON.parse(raw) as BookDraftSnapshot;
+        if (snap && Array.isArray(snap.chapters) && snapshotHasContent(snap)) {
+          setRestorable(snap);
+          return; // keep autosave paused until the user decides
+        }
+        localStorage.removeItem(AUTOSAVE_KEY);
+      }
+    } catch {
+      /* corrupt snapshot — ignore */
+    }
+    setReady(true);
+  }, []);
+
+  // Debounced local-only autosave. Fires a little after the user stops typing.
+  useEffect(() => {
+    if (!ready) return;
+    const id = setTimeout(() => {
+      try {
+        const snap: BookDraftSnapshot = {
+          v: AUTOSAVE_VERSION,
+          title,
+          coverImageUrl,
+          description,
+          price,
+          chapters,
+          savedAt: Date.now(),
+        };
+        if (snapshotHasContent(snap)) localStorage.setItem(AUTOSAVE_KEY, JSON.stringify(snap));
+        else clearAutosave();
+      } catch {
+        /* storage full / unavailable — best-effort only */
+      }
+    }, 1200);
+    return () => clearTimeout(id);
+  }, [ready, title, coverImageUrl, description, price, chapters]);
+
+  function restoreDraft() {
+    if (!restorable) return;
+    setTitle(restorable.title ?? "");
+    setCoverImageUrl(restorable.coverImageUrl ?? "");
+    setDescription(restorable.description ?? "");
+    setPrice(restorable.price || "0.05");
+    setChapters(restorable.chapters?.length ? restorable.chapters : [{ title: "Chapter 1", body: "" }]);
+    setRestorable(null);
+    setReady(true);
+    toast("success", "Restored your unsaved draft.");
+  }
+  function discardDraft() {
+    clearAutosave();
+    setRestorable(null);
+    setReady(true);
+  }
 
   function updateChapter(i: number, patch: Partial<ChapterDraft>) {
     setChapters((cs) => cs.map((c, idx) => (idx === i ? { ...c, ...patch } : c)));
@@ -52,7 +142,7 @@ export default function CreateBookPage() {
       return;
     }
     if (totalPages < 2) {
-      toast("warning", "Add at least 2 pages — the first is a free preview. Use a `---` line to split pages.");
+      toast("warning", "Add at least 2 pages. The first is a free preview. Use a `---` line to split pages.");
       return;
     }
     setBusy(true);
@@ -72,8 +162,10 @@ export default function CreateBookPage() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.message ?? data.error ?? "Couldn't save the book.");
+      // Backend is now the source of truth — drop the local crash-protection copy.
+      clearAutosave();
       if (data.walletRequired) {
-        toast("info", "Saved as a draft — add a payout wallet in your dashboard to publish.");
+        toast("info", "Saved as a draft. Add a payout wallet in your dashboard to publish.");
         router.push("/dashboard");
         return;
       }
@@ -95,6 +187,25 @@ export default function CreateBookPage() {
       <p className="mb-8 font-body-md text-on-surface-variant">
         Serialized, pay-as-you-read long-form. Readers turn the page in an immersive viewer and pay per page silently.
       </p>
+
+      {restorable && (
+        <div className="mb-6 flex flex-col gap-3 rounded-xl border border-primary/40 bg-primary/5 p-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-start gap-2">
+            <span className="material-symbols-outlined mt-0.5 shrink-0 text-[20px] text-primary">history</span>
+            <p className="font-body-sm text-on-surface-variant">
+              We found unsaved changes from your last session on this device. Restore them?
+            </p>
+          </div>
+          <div className="flex shrink-0 gap-2">
+            <button onClick={discardDraft} className="rounded-lg border border-outline-variant px-3 py-1.5 font-body-sm hover:bg-surface-container-low">
+              Discard
+            </button>
+            <button onClick={restoreDraft} className="btn-primary px-4 py-1.5 text-body-sm">
+              Restore
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Book setup */}
       <section className="card mb-6 flex flex-col gap-4">

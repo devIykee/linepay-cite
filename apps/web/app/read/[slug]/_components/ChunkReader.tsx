@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useChainId, useSignTypedData, useSwitchChain } from "wagmi";
@@ -78,8 +78,13 @@ export default function ChunkReader(props: Props) {
   const { slug, title, summary, creatorHandle, pricePerBlock, chunks, agentUrl } = props;
   const isPicture = props.contentType === "picture";
   const storageKey = `skimflow_reader_${slug}`;
+  // Reading-progress save point — the top-most block the reader had reached, so
+  // we can drop them back there on return instead of at the top.
+  const posKey = `skimflow_reader_pos_${slug}`;
 
   const [unlocked, setUnlocked] = useState<Record<number, string>>({});
+  const [hydrated, setHydrated] = useState(false);
+  const savedPosRef = useRef<number | null>(null);
   const [paying, setPaying] = useState<number | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -119,7 +124,8 @@ export default function ChunkReader(props: Props) {
   // Admins always use an external wallet (no embedded provisioning offered).
   const canCreateEmbedded = embedded.status?.enabled === true && embedded.status?.isAdmin === false;
 
-  // Hydrate unlocked chunks from localStorage so refresh keeps progress.
+  // Hydrate unlocked chunks + the saved reading position from localStorage so a
+  // refresh (or a later visit) keeps progress and the scroll spot.
   useEffect(() => {
     try {
       const saved = localStorage.getItem(storageKey);
@@ -127,7 +133,62 @@ export default function ChunkReader(props: Props) {
     } catch {
       /* ignore */
     }
-  }, [storageKey]);
+    try {
+      const p = localStorage.getItem(posKey);
+      if (p != null && p !== "") savedPosRef.current = Number(p);
+    } catch {
+      /* ignore */
+    }
+    setHydrated(true);
+  }, [storageKey, posKey]);
+
+  // Restore the reading position once, after hydration laid out the blocks.
+  useEffect(() => {
+    if (!hydrated) return;
+    const idx = savedPosRef.current;
+    if (idx == null || idx <= 0) return;
+    const raf = requestAnimationFrame(() => {
+      const el = document.getElementById(`sf-block-${idx}`);
+      if (el) {
+        el.scrollIntoView({ block: "start" });
+        toast("info", "Picked up where you left off.");
+      }
+    });
+    return () => cancelAnimationFrame(raf);
+    // Run only when hydration flips true; toast is stable.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hydrated]);
+
+  // Track the top-most visible block as the reader scrolls and persist it
+  // (rAF-throttled). This is the "save point" the restore above reads back.
+  useEffect(() => {
+    if (!hydrated) return;
+    let scheduled = 0;
+    const onScroll = () => {
+      if (scheduled) return;
+      scheduled = requestAnimationFrame(() => {
+        scheduled = 0;
+        const offset = 140; // ~ below the sticky header
+        let current = 0;
+        for (const c of chunks) {
+          const el = document.getElementById(`sf-block-${c.blockIndex}`);
+          if (!el) continue;
+          if (el.getBoundingClientRect().top <= offset) current = c.blockIndex;
+          else break;
+        }
+        try {
+          localStorage.setItem(posKey, String(current));
+        } catch {
+          /* ignore quota */
+        }
+      });
+    };
+    window.addEventListener("scroll", onScroll, { passive: true });
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      if (scheduled) cancelAnimationFrame(scheduled);
+    };
+  }, [hydrated, chunks, posKey]);
 
   // Detect an existing silent-payment session for this device.
   useEffect(() => {
@@ -297,7 +358,7 @@ export default function ChunkReader(props: Props) {
 
     let d: { paid?: boolean; text?: string; amountDisplay?: string; friendly?: string; error?: string };
     if (gatewayBalance >= amountWei) {
-      toast("info", "Confirm to unlock — no gas fees.");
+      toast("info", "Confirm to unlock. No gas fees.");
       const now = Math.floor(Date.now() / 1000);
       const validAfter = (now - 600).toString();
       const validBefore = (now + Math.max(req.maxTimeoutSeconds, 7 * 24 * 3600 + 100)).toString();
@@ -322,7 +383,7 @@ export default function ChunkReader(props: Props) {
         functionName: "transfer",
         args: [req.payTo, amountWei],
       });
-      toast("info", "Payment sent — confirming on Arc…");
+      toast("info", "Payment sent. Confirming on Arc…");
       await waitForTransactionReceipt(wagmiConfig, { hash });
       d = await (await fetch(`/api/reader/${slug}`, {
         method: "POST",
@@ -411,7 +472,7 @@ export default function ChunkReader(props: Props) {
     } catch (e) {
       const msg = String((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? e);
       if (/rejected|denied|cancell?ed/i.test(msg)) {
-        toast("info", "Payment cancelled — nothing was charged.");
+        toast("info", "Payment cancelled. Nothing was charged.");
       } else {
         setError(msg);
         toast("error", msg, "Payment failed");
@@ -438,7 +499,7 @@ export default function ChunkReader(props: Props) {
           const r = await doSilentPay(prior, q, { optimistic: true, priorToken: null });
           if (!r.ok) {
             setBlocked(true);
-            setError("Still couldn't settle that payment — add funds to continue.");
+            setError("Still couldn't settle that payment. Add funds to continue.");
             return;
           }
           lastTokenRef.current = r.token ?? null;
@@ -480,7 +541,7 @@ export default function ChunkReader(props: Props) {
       for (const [k, v] of Object.entries(d.texts as Record<string, string>)) merged[Number(k)] = v;
       persist(merged);
       window.dispatchEvent(new Event(PAY_SESSION_EVENT));
-      toast("success", "Unlocked the whole piece — enjoy.");
+      toast("success", "Unlocked the whole piece. Enjoy.");
       return true;
     }
     if (res.status === 401 || d.error === "no_pay_session") {
@@ -521,7 +582,7 @@ export default function ChunkReader(props: Props) {
       }
     } catch (e) {
       const msg = String((e as { shortMessage?: string; message?: string })?.shortMessage ?? (e as Error)?.message ?? e);
-      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Payment cancelled — nothing was charged.");
+      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Payment cancelled. Nothing was charged.");
       else {
         setError(msg);
         toast("error", msg, "Couldn't unlock the whole piece");
@@ -553,7 +614,7 @@ export default function ChunkReader(props: Props) {
     setPaying(blockIndex);
     try {
       await embedded.provision();
-      toast("success", "Wallet created — you can pay per block now.");
+      toast("success", "Wallet created. You can pay per block now.");
       // status refresh is async; the user can tap Unlock once it lands.
     } catch (e) {
       const msg = String((e as { message?: string })?.message ?? e);
@@ -614,7 +675,7 @@ export default function ChunkReader(props: Props) {
           <span className="material-symbols-outlined text-[18px]">auto_stories</span>
           {paying === -1
             ? "Unlocking the whole piece…"
-            : `Unlock the whole ${isPicture ? "set" : "piece"} — ${formatUsdc(wholeDisplay)} USDC`}
+            : `Unlock the whole ${isPicture ? "set" : "piece"} for ${formatUsdc(wholeDisplay)} USDC`}
         </button>
       )}
 
@@ -622,20 +683,20 @@ export default function ChunkReader(props: Props) {
         {chunks.map((c) => {
           const text = c.isFree ? c.text : unlocked[c.blockIndex];
           const isUnlocked = text !== undefined && text !== null;
+          let inner: ReactNode;
           if (isUnlocked) {
             // Picture Skim-Flow: the unlocked `text` is the image URL.
-            if (isPicture) {
-              return <SkimImage key={c.id} src={text} caption={c.caption} slug={slug} blockIndex={c.blockIndex} />;
-            }
-            return (
-              <article key={c.id}>
+            inner = isPicture ? (
+              <SkimImage src={text} caption={c.caption} slug={slug} blockIndex={c.blockIndex} />
+            ) : (
+              <article>
                 <RichText source={text} />
               </article>
             );
-          }
-          const isNext = nextLocked?.id === c.id;
-          return (
-            <div key={c.id} className="relative py-2">
+          } else {
+            const isNext = nextLocked?.id === c.id;
+            inner = (
+              <div className="relative py-2">
               {/* Borderless blurred continuation — same column as the article,
                   fading into the page background (no card, no hard edges). */}
               <div
@@ -727,6 +788,13 @@ export default function ChunkReader(props: Props) {
                 </div>
               )}
             </div>
+            );
+          }
+          // Stable per-block anchor for the reading-progress save point.
+          return (
+            <div key={c.id} id={`sf-block-${c.blockIndex}`} data-block={c.blockIndex} className="scroll-mt-20">
+              {inner}
+            </div>
           );
         })}
       </div>
@@ -736,7 +804,7 @@ export default function ChunkReader(props: Props) {
       {payable.length > 0 && unlockedPayable === payable.length && (
         <div className="mt-8 flex items-center justify-center gap-2 rounded-xl border border-secondary/30 bg-secondary/5 p-6 text-center font-body-md text-secondary">
           <span className="material-symbols-outlined text-[20px]">check_circle</span>
-          Fully unlocked — every block paid the creator directly.
+          Fully unlocked. Every block paid the creator directly.
         </div>
       )}
 
@@ -795,7 +863,7 @@ function SkimImage({
         <span className="material-symbols-outlined text-[28px] text-outline">broken_image</span>
         <span className="font-body-sm text-[13px] text-on-surface-variant">This image is no longer available.</span>
         {reported ? (
-          <span className="font-body-sm text-[12px] text-secondary">Reported — thanks, our team will review it.</span>
+          <span className="font-body-sm text-[12px] text-secondary">Reported. Thanks, our team will review it.</span>
         ) : (
           <button onClick={report} className="font-body-sm text-[12px] text-primary hover:underline">
             Report this issue

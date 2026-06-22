@@ -27,7 +27,7 @@ export default function DashboardClient({ user, impersonating }: { user: User; i
     <div className="mx-auto max-w-max-width px-margin-mobile py-stack-md md:px-margin-desktop">
       {impersonating && (
         <div className="mb-4 flex items-center justify-between rounded-lg border border-orange-400 bg-orange-50 px-4 py-3 text-orange-900">
-          <span className="flex items-center gap-2"><span className="material-symbols-outlined text-[18px]">warning</span>You are viewing as {user.name ?? user.email} — actions are disabled.</span>
+          <span className="flex items-center gap-2"><span className="material-symbols-outlined text-[18px]">warning</span>You are viewing as {user.name ?? user.email}. Actions are disabled.</span>
           <button
             onClick={async () => {
               await fetch("/api/admin/impersonate", { method: "DELETE", credentials: "include" });
@@ -97,7 +97,7 @@ function WalletBanner({ onLinked }: { onLinked: () => void }) {
   async function createFree() {
     try {
       await provision();
-      toast("success", "Your free wallet is ready — payouts route here automatically.");
+      toast("success", "Your free wallet is ready. Payouts route here automatically.");
       onLinked();
     } catch (e) {
       toast("error", String((e as Error)?.message ?? e), "Couldn't create your wallet");
@@ -137,7 +137,7 @@ function WalletBanner({ onLinked }: { onLinked: () => void }) {
             {embBusy ? "Creating…" : "Create your free wallet"}
           </button>
           <p className="mt-1 font-body-sm text-[12px] text-yellow-800">
-            No download — secured by a PIN. Payouts route here automatically. Or paste your own address below.
+            No download, secured by a PIN. Payouts route here automatically. Or paste your own address below.
           </p>
         </div>
       )}

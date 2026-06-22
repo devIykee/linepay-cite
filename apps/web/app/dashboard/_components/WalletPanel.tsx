@@ -89,7 +89,7 @@ export default function WalletPanel({ impersonating }: { impersonating: boolean 
                   await navigator.clipboard.writeText(data.fundingAddress!);
                   toast("success", "Address copied.");
                 } catch {
-                  toast("error", "Couldn’t copy — select it manually.");
+                  toast("error", "Couldn’t copy. Select it manually.");
                 }
               }}
               className="font-data-mono text-[12px] text-primary hover:underline"
@@ -199,7 +199,7 @@ function WithdrawForm({
         }
         if (d.status === "failed") {
           setStatus("failed");
-          toast("error", "Withdrawal failed — funds were not sent.");
+          toast("error", "Withdrawal failed. Funds were not sent.");
           return;
         }
       } catch {
@@ -207,7 +207,7 @@ function WithdrawForm({
       }
     }
     // Still pending after the cap — leave it; the history list will reflect it.
-    toast("info", "Withdrawal is still settling — check history shortly.");
+    toast("info", "Withdrawal is still settling. Check history shortly.");
     onDone();
   }
 
@@ -230,7 +230,7 @@ function WithdrawForm({
       setStatus("pending");
       toast("info", "Confirm the withdrawal with your PIN…");
       await executeChallenge(d.challengeId, { userToken: d.userToken, encryptionKey: d.encryptionKey });
-      toast("info", "Withdrawal submitted — settling on Arc…");
+      toast("info", "Withdrawal submitted. Settling on Arc…");
       setAmount("");
       setDestination("");
       // The transfer challenge returns once submitted; Circle assigns a tx we

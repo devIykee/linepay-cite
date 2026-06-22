@@ -4,10 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession, signOut } from "next-auth/react";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
-import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
-import { useToast } from "@/components/Toaster";
 
 /**
  * Unified account control in the header. Nests two independent identities
@@ -91,15 +88,8 @@ export default function UserMenu() {
                 {isAdmin && <MenuLink href="/admin" icon="shield_person" label="Admin console" onClick={() => setOpen(false)} />}
               </div>
 
-              <div className="border-t border-outline-variant px-4 py-3">
-                <p className="mb-2 font-label-caps text-label-caps text-on-surface-variant">Payout wallet</p>
-                {/* Admins always use an external wallet; creators default to a free embedded one. */}
-                {isAdmin ? (
-                  <ConnectButton showBalance={false} chainStatus="icon" accountStatus="address" />
-                ) : (
-                  <EmbeddedWalletSection />
-                )}
-              </div>
+              {/* Wallet connection lives in Profile settings now (the "Payout
+                  wallet" section there), so it isn't duplicated in this menu. */}
 
               <div className="border-t border-outline-variant py-1">
                 <button
@@ -120,69 +110,9 @@ export default function UserMenu() {
               <div className="border-t border-outline-variant py-1">
                 <MenuLink href="/login" icon="login" label="Creator sign-in" onClick={() => setOpen(false)} />
               </div>
-              <div className="border-t border-outline-variant px-4 py-3">
-                <p className="mb-2 font-label-caps text-label-caps text-on-surface-variant">Wallet</p>
-                <ConnectButton showBalance={false} chainStatus="icon" accountStatus="address" />
-              </div>
             </>
           )}
         </div>
-      )}
-    </div>
-  );
-}
-
-/**
- * Creator payout wallet control: the auto-generated embedded wallet is the
- * default; bringing your own (RainbowKit) is the fallback. Provisioning creates
- * a non-custodial Circle wallet the user secures with a PIN.
- */
-function EmbeddedWalletSection() {
-  const { status: emb, busy, provision } = useEmbeddedWallet();
-  const { isConnected } = useAccount();
-  const toast = useToast();
-
-  async function create() {
-    try {
-      await provision();
-      toast("success", "Your free wallet is ready — payouts route here automatically.");
-    } catch (e) {
-      toast("error", String((e as Error)?.message ?? e), "Couldn't create your wallet");
-    }
-  }
-
-  if (emb?.enabled === false) {
-    // Embedded wallets not configured — fall back to external connect.
-    return <ConnectButton showBalance={false} chainStatus="icon" accountStatus="address" />;
-  }
-
-  if (emb?.hasWallet && emb.address) {
-    return (
-      <div>
-        <div className="flex items-center gap-1.5">
-          <span className="material-symbols-outlined text-[16px] text-secondary">account_balance_wallet</span>
-          <code className="font-data-mono text-[12px]">{emb.address.slice(0, 6)}…{emb.address.slice(-4)}</code>
-          <span className="pill text-[10px]">free wallet</span>
-        </div>
-        <p className="mt-2 font-body-sm text-[11px] text-on-surface-variant">
-          Payouts route here automatically. Prefer your own wallet?
-        </p>
-        <div className="mt-2"><ConnectButton showBalance={false} chainStatus="none" accountStatus="address" /></div>
-      </div>
-    );
-  }
-
-  return (
-    <div>
-      <button onClick={create} disabled={busy} className="btn-primary w-full px-4 py-2 text-label-lg disabled:opacity-50">
-        {busy ? "Creating…" : "Create your free wallet"}
-      </button>
-      <p className="mt-2 font-body-sm text-[11px] text-on-surface-variant">
-        No download — secured by a PIN. Or bring your own:
-      </p>
-      <div className="mt-2"><ConnectButton showBalance={false} chainStatus="none" accountStatus="address" /></div>
-      {isConnected && (
-        <p className="mt-1 font-body-sm text-[11px] text-on-surface-variant">Connected wallet will be used for payouts.</p>
       )}
     </div>
   );

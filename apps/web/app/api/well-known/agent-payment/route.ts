@@ -39,6 +39,9 @@ export async function GET() {
         auth_header: "X-Payment-Token", // legacy fallback
       },
     ],
+    // Machine-readable catalog of everything for sale (slugs, prices, resource
+    // URLs) so an agent can discover services without scraping the HTML feed.
+    services: "/.well-known/agent-skills.json",
     feed: "/for-you",
     marketplace: "/for-you", // back-compat alias (the feed was formerly "/marketplace")
     docs: "/read/agent-skills.md",

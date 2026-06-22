@@ -124,9 +124,9 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         setSourcePlatform(d.sourcePlatform ?? null);
         setNeedsMeta(!!d.needsMetadata);
         if (d.needsMetadata) {
-          toast("warning", "Imported — add a description before publishing this Agent Skill (the file had none).");
+          toast("warning", "Imported. Add a description before publishing this Agent Skill (the file had none).");
         } else {
-          toast("success", "Imported — review and publish when ready.");
+          toast("success", "Imported. Review and publish when ready.");
         }
       } else {
         toast("error", d.message ?? d.error ?? "Import failed");
@@ -156,7 +156,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
     };
     probe.onerror = () => {
       setImgChecking(false);
-      toast("error", "This link isn't publicly viewable as an image — check sharing settings or use a direct image URL.");
+      toast("error", "This link isn't publicly viewable as an image. Check sharing settings or use a direct image URL.");
     };
     probe.src = url;
   }
@@ -169,7 +169,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
   function applyAutoChunk() {
     if (!body.trim()) return;
     setBody(autoChunkArticle(body));
-    toast("info", "Re-grouped into chunks that meet the limits — review the preview below.");
+    toast("info", "Re-grouped into chunks that meet the limits. Review the preview below.");
   }
 
   async function publish(status: "draft" | "published") {
@@ -200,7 +200,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         setTitle(""); setBody(""); setSummary(""); setTags(""); setPreview(null);
         setSourceUrl(null); setSourcePlatform(null); setNeedsMeta(false); setImages([]);
         loadList();
-        toast("info", d.message ?? "Saved to drafts — create a wallet to publish.");
+        toast("info", d.message ?? "Saved to drafts. Create a wallet to publish.");
       } else if (r.ok) {
         if (status === "published") setPublished({ readerUrl: d.readerUrl, agentUrl: d.agentUrl });
         setTitle(""); setBody(""); setSummary(""); setTags(""); setPreview(null);
@@ -208,7 +208,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         loadList();
         toast(
           "success",
-          status === "published" ? "Published — it's live in the For You feed now." : "Draft saved."
+          status === "published" ? "Published. It's live in the For You feed now." : "Draft saved."
         );
       } else if (d.error === "chunk_validation") {
         // Surface the first couple of specific chunk problems so the creator
@@ -239,10 +239,10 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         if (r.ok) {
           setWalletGatedDraft(null);
           loadList();
-          toast("success", "Published — it's live in the For You feed now.");
+          toast("success", "Published. It's live in the For You feed now.");
         } else {
           const d = await r.json().catch(() => ({}));
-          toast("error", d.message ?? d.error ?? "Wallet created, but publishing the draft failed — try Publish from the table.");
+          toast("error", d.message ?? d.error ?? "Wallet created, but publishing the draft failed. Try Publish from the table.");
         }
       }
     } catch (e) {
@@ -281,7 +281,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
       body: JSON.stringify({ status: next }),
     });
     loadList();
-    toast("success", next === "published" ? "Now live in the For You feed." : "Unpublished — hidden from the For You feed.");
+    toast("success", next === "published" ? "Now live in the For You feed." : "Unpublished. Hidden from the For You feed.");
   }
 
   const disabled = impersonating;
@@ -319,7 +319,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
           <button onClick={doImport} disabled={busy || disabled} className="btn-primary px-5 py-2">Import &amp; Monetize</button>
         </div>
         <p className="mt-2 font-body-sm text-[12px] text-on-surface-variant">
-          Want to share an X post? Copy and paste the text into the editor below — it publishes as a single chunk.
+          Want to share an X post? Copy and paste the text into the editor below. It publishes as a single chunk.
         </p>
 
         {/* Import provenance (informational — publishing is never gated). */}
@@ -391,7 +391,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         {/* Agent-skills block 0 helper */}
         {contentType === "agent-skills" && preview?.block0Template && (
           <details className="mt-4">
-            <summary className="cursor-pointer font-label-lg text-primary">Auto-generated free block 0 (agents see this) — you don&apos;t write it</summary>
+            <summary className="cursor-pointer font-label-lg text-primary">Auto-generated free block 0 (agents see this). You don&apos;t write it</summary>
             <pre className="mt-2 max-h-64 overflow-auto rounded-lg bg-[#0b0c10] p-4 font-data-mono text-[11px] text-[#e4e2dd]">{preview.block0Template}</pre>
             <p className="mt-1 font-body-sm text-on-surface-variant">
               How agents use this: they GET the agent endpoint, read this free block, pay per block via Circle Gateway, and retry with an <code>X-Payment-Token</code> header.
@@ -402,7 +402,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         {/* Publish is blocked while any chunk violates the limits (article only). */}
         {contentType === "article" && preview?.hasErrors && (
           <div className="mt-4 rounded-lg border border-error/40 bg-error/5 p-3 font-body-sm text-[13px] text-error">
-            Some chunks don&apos;t meet the limits — fix the flagged chunks below or hit <strong>Auto-chunk</strong> before publishing.
+            Some chunks don&apos;t meet the limits. Fix the flagged chunks below or hit <strong>Auto-chunk</strong> before publishing.
           </div>
         )}
 
@@ -439,7 +439,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
           <div className="mt-4 rounded-lg border border-primary/30 bg-primary/5 p-4">
             <div className="mb-1 flex items-center gap-2 font-label-lg text-primary">
               <span className="material-symbols-outlined text-[18px]">account_balance_wallet</span>
-              Saved to drafts — a wallet is needed to publish
+              Saved to drafts. A wallet is needed to publish
             </div>
             <p className="mb-3 font-body-sm text-on-surface-variant">
               You get paid in USDC when readers unlock your work, so publishing needs a payout wallet.
@@ -533,7 +533,7 @@ function UrlRow({ label, url }: { label: string; url: string }) {
       await navigator.clipboard.writeText(abs);
       toast("success", "Link copied to clipboard");
     } catch {
-      toast("error", "Couldn't copy — select and copy the link manually.");
+      toast("error", "Couldn't copy. Select and copy the link manually.");
     }
   }
   return (
@@ -616,7 +616,7 @@ function PictureEditor({
       )}
 
       <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 font-body-sm text-[12px] text-on-surface-variant">
-        Images are linked, not uploaded — if you remove or unshare the original file later, readers who paid won&apos;t be
+        Images are linked, not uploaded. If you remove or unshare the original file later, readers who paid won&apos;t be
         able to see it.
       </div>
     </div>
