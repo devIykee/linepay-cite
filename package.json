@@ -1,5 +1,5 @@
 {
-  "name": "lepton-skimflow-cite",
+  "name": "skimflow",
   "version": "0.1.0",
   "private": true,
   "description": "Skimflow — pay-per-block reading for people and AI agents, with an autonomous paying agent. Built on x402 + Circle Gateway + Arc.",

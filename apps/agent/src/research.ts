@@ -1,5 +1,5 @@
 /**
- * Autonomous multi-source research agent (RFB 1).
+ * Autonomous multi-source research agent.
  *
  * Given a natural-language query, the agent runs the full loop on its own:
  *

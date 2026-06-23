@@ -13,7 +13,7 @@ import type { Address } from "./types.js";
  * driven so the same code runs live (real testnet USDC) or in local simulation.
  *
  * Provision wallets + test USDC with the Circle CLI (`@circle-fin/cli`) and the
- * Canteen ARC CLI; see README → "Going live on Arc testnet".
+ * Arc testnet RPC; see README → "Going live on Arc".
  */
 export interface ArcConfig {
   rpcUrl: string;

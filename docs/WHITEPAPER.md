@@ -1,7 +1,7 @@
 # Skimflow: Nanopayments for People and Agents
 ### A pay-per-block content market settled in USDC on Arc
 
-**Version 0.1 — Lepton Agents Hackathon edition (testnet)**
+**Version 0.1 (testnet)**
 
 > This white paper sets out the *why* and the *how* behind Skimflow: the economic problem it addresses, the architecture that makes a sub-cent payment practical, and the two-sided market — human readers and autonomous AI agents — that one paywall now serves. It is distinct from the in-app creator guide (`/docs`) and the [partner/developer guide](./PARTNERS.md).
 
@@ -26,9 +26,9 @@ Both exist because the underlying rails could not clear a small payment economic
 
 The cost of the floor is **the long tail**: the niche essay, the single photograph, the one chapter, the specific answer. Work too small or too specific to bundle simply went unmonetized — or unpaid, scraped as free substrate.
 
-## 2. The thesis: the lepton reborn
+## 2. The thesis: the smallest coin reborn
 
-Every historical economy minted a *smallest coin* — the Greek **lepton**, the Roman *quadrans* — struck so ordinary people could buy everyday things. Software has no minting cost, so the smallest unit can shrink indefinitely. The nanopayment is the lepton reborn for machines.
+Every historical economy minted a *smallest coin* — struck so ordinary people could buy everyday things like bread, water, and a day's wage. Software has no minting cost, so the smallest unit can shrink indefinitely. The nanopayment is that smallest coin reborn for machines.
 
 Skimflow's claim is narrow and testable: **when the smallest unit of value can move cheaply and instantly, the smallest unit of content becomes sellable — and the market reorganizes around it.** Pricing moves from "a month of everything" to "exactly this block," and the buyer pool expands from humans to agents.
 
@@ -144,7 +144,7 @@ This opens adjacent designs the rail makes economical for the first time: **cita
 
 ## 11. Conclusion
 
-The floor was never a law of nature; it was a property of the rails. Remove it — with USDC-native gas, gasless batching, sub-second finality, and a payment protocol agents can read — and the smallest unit of content becomes sellable to the smallest, most numerous buyers, human and machine alike. Skimflow is a working demonstration that the lepton, the smallest coin, comes back as the nanopayment.
+The floor was never a law of nature; it was a property of the rails. Remove it — with USDC-native gas, gasless batching, sub-second finality, and a payment protocol agents can read — and the smallest unit of content becomes sellable to the smallest, most numerous buyers, human and machine alike. Skimflow is a working demonstration that the smallest coin comes back as the nanopayment.
 
 ---
 

@@ -103,7 +103,7 @@ POST /api/import-url   { "url": "https://github.com/you/repo/blob/main/SKILL.md"
 
 ## 3. Distribution sidecars (attach payments from the outside)
 
-The hackathon's thesis: the audiences already exist in open-source, self-hosted communities — they just have no way to move money. You don't fork the project; you attach a **payment sidecar** through the webhooks/plugins/APIs it already exposes, and use Skimflow's per-block settlement underneath. Patterns we're actively interested in partnering on:
+The thesis: the audiences already exist in open-source, self-hosted communities — they just have no way to move money. You don't fork the project; you attach a **payment sidecar** through the webhooks/plugins/APIs it already exposes, and use Skimflow's per-block settlement underneath. Patterns we're actively interested in partnering on:
 
 - **Per-listen royalties** for a Navidrome/Subsonic server (split by what was actually played).
 - **Per-second VOD** for Jellyfin / Owncast / PeerTube (settle elapsed time to rights holders).
@@ -115,7 +115,7 @@ If you maintain or build on one of these, talk to us — this is the fastest pat
 ## 4. Running it yourself
 
 ```bash
-git clone <repo> && cd lepton-linepay-cite
+git clone <repo> && cd skimflow
 npm install && npm run up          # auto Postgres (Docker), migrate, seed, start — simulate mode, no keys
 ```
 Flip `PAYMENTS_MODE=live` (+ Circle/Arc env) to settle real test USDC. Architecture, env, and contract details are in the [README](../README.md); tooling friction we've reported to Circle is in [`CIRCLE_FEEDBACK.md`](../CIRCLE_FEEDBACK.md).
@@ -140,14 +140,14 @@ Skimflow's revenue split includes a **5% referrer cut that settles on-chain, aut
 
 ## Segments worth targeting first
 
-1. **AI agent / tool builders** — they need paid data and skills; we're the supply. (RFB 1/2/3.)
-2. **Independent writers & newsletters** priced out by the subscription floor. (RFB 6.)
-3. **Self-hosted / OSS media communities** with audiences and no payment layer. (Distribution sidecars.)
+1. **AI agent / tool builders** — they need paid data and skills; we're the supply.
+2. **Independent writers & newsletters** priced out by the subscription floor.
+3. **Self-hosted / OSS media communities** with audiences and no payment layer (distribution sidecars).
 4. **Photographers & visual creators** — per-image Skimflow essays.
 
 ## Co-marketing we're open to
 
-- Joint demos showing an **agent autonomously paying a creator** (great for content, and exactly what hackathon-style audiences want to see).
+- Joint demos showing an **agent autonomously paying a creator** (great for content, and exactly what developer audiences want to see).
 - Affiliate / revenue-share campaigns using the referral rail above.
 - Integration spotlights for any distribution sidecar (we'll feature your project; you bring the audience).
 - Case studies on **creators getting paid** and **agents consuming** in test USDC.
@@ -161,6 +161,6 @@ Skimflow's revenue split includes a **5% referrer cut that settles on-chain, aut
 
 ## Talk to us
 
-Open an issue/PR on the repo, or reach the team in the **Canteen Discord** (mention *Skimflow*). For partnership or affiliate inquiries, include: who your audience is, what you'd integrate or promote, and the rough volume you can point to.
+Open an issue/PR on the repo to reach the team. For partnership or affiliate inquiries, include: who your audience is, what you'd integrate or promote, and the rough volume you can point to.
 
 > ⚠️ **Testnet only.** All amounts are **test USDC** with no real-world value. Nothing here is financial advice or an offer of securities.

@@ -1,6 +1,6 @@
-# Circle developer-tooling feedback — Skimflow (Lepton Agents Hackathon)
+# Circle developer-tooling feedback — Skimflow
 
-Submitted for the **Feedback Incentives** pool. Everything below is from actually shipping a per-block paywall that settles **real test USDC on Arc** through **Gateway + x402 + embedded Wallets**. Each item is concrete, has a repo reference, and ends with a suggested fix. We've ordered them by how much time they cost us.
+Everything below is from actually shipping a per-block paywall that settles **real test USDC on Arc** through **Gateway + x402 + embedded Wallets**. Each item is concrete, has a repo reference, and ends with a suggested fix. We've ordered them by how much time they cost us.
 
 Context: Next.js 15 app, both a human reader (Circle embedded wallets, silent session-key payments) and an autonomous buyer agent (x402). `PAYMENTS_MODE=live` settles via `POST /v1/x402/settle`.
 
@@ -68,7 +68,7 @@ On environments that advertise IPv6 but can't route it (WSL2, some CI), Node's d
 ## What worked really well (so the signal isn't all friction)
 
 - **Simulate-first design is the right call.** Being able to run the entire 402 → pay → unlock loop with no keys and no funds made development and review dramatically faster. We kept one code path for simulate and live, gated only by `PAYMENTS_MODE`.
-- **EIP-3009 + Gateway batching** genuinely delivers gas-free, sub-cent settlement — the core thesis of the hackathon held up end-to-end on Arc.
+- **EIP-3009 + Gateway batching** genuinely delivers gas-free, sub-cent settlement — the core thesis held up end-to-end on Arc.
 - **The ARC CLI bundling Arc repos/docs as agent context** is a great idea: a coding agent could build against Arc with the reference material already in-context.
 - **Faucet + Arc explorer** were reliable throughout.
 

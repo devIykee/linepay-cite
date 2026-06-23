@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────────────────
 # Circle Agent Stack + Arc testnet bootstrap.
-# Installs the Circle CLI and the Canteen ARC CLI, then prints the steps to
+# Installs the Circle CLI and the ARC CLI, then prints the steps to
 # create an agent wallet and fund it with TEST USDC.
 #
 #   bash scripts/circle-setup.sh
@@ -17,7 +17,7 @@ else
 fi
 
 echo
-echo "▸ ARC CLI (Canteen-hosted Arc testnet RPC + agent context)"
+echo "▸ ARC CLI (Arc testnet RPC + agent context)"
 if command -v uv >/dev/null 2>&1; then
   uv tool install git+https://github.com/the-canteen-dev/ARC-cli || true
 else

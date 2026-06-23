@@ -2,7 +2,7 @@
 
 ### *Pay-per-block reading for people and AI agents. The smallest unit of writing, finally sellable.*
 
-Skimflow makes the smallest unit of content — a single **block** (a few paragraphs, one image, one page of a book) — sellable on its own. Creators publish articles, photo essays, agent skills, and books behind an **x402** paywall; **both human readers and AI agents** pay **per block** (from $0.000001), settled gas-free as **USDC on Arc** through **Circle Gateway**, with an automatic **80/12/5/3** revenue split. The payment floor that forced everything into $10/month subscriptions is gone — so the lepton, the smallest coin, comes back as the nanopayment.
+Skimflow makes the smallest unit of content — a single **block** (a few paragraphs, one image, one page of a book) — sellable on its own. Creators publish articles, photo essays, agent skills, and books behind an **x402** paywall; **both human readers and AI agents** pay **per block** (from $0.000001), settled gas-free as **USDC on Arc** through **Circle Gateway**, with an automatic **80/12/5/3** revenue split. The payment floor that forced everything into $10/month subscriptions is gone — so the smallest unit of value is finally worth moving.
 
 For humans the crypto disappears: one tap sets up a session, and every block after unlocks **with no wallet popup**, drawn from a "reading fuel" gauge. For agents, three machine-readable endpoints turn the whole catalog into a pay-per-request API.
 
@@ -21,7 +21,7 @@ Runs **end-to-end out of the box in simulate mode** (no keys, no funds), and fli
 > Requires Node ≥ 20.6 and Docker (for the local Postgres — auto-started if you have no `DATABASE_URL`).
 
 ```bash
-cd lepton-linepay-cite
+cd skimflow
 npm install
 npm run up            # ensures a DB, migrates, seeds demo content, starts the server
 ```
@@ -55,7 +55,7 @@ npm run test:x402 -- --url http://localhost:3000 --slug <agent-skill-slug> --sim
 | Type | Unit sold | Reader experience |
 |---|---|---|
 | **Article** | a chunk (~6 lines / 400 words) | vertical reader; block 0 free, the rest blur until unlocked |
-| **Agent Skills** | a skill block | a `.md` endpoint agents pay per block to read (RFB 2) |
+| **Agent Skills** | a skill block | a `.md` endpoint agents pay per block to read |
 | **Skimflow** | one image | a photo essay; first image free, each next image is a paid unlock |
 | **Book** | one page | full-screen Moon+-style reader (chapters → pages), swipe/keys to turn |
 
@@ -113,11 +113,7 @@ The flow is the canonical x402 loop: **GET → 402 quote → sign EIP-3009 / bui
 
 ## Going live on Arc
 
-1. Provision a funded Arc testnet key + RPC (Canteen ARC CLI), get test USDC from `faucet.circle.com`:
-   ```bash
-   uv tool install git+https://github.com/the-canteen-dev/ARC-cli
-   ```
-   Set `ARC_RPC_URL` / `ARC_CHAIN_ID` (`5042002`) in `.env`.
+1. Point at the Arc testnet RPC (`https://rpc.testnet.arc.network`) and get test USDC from `faucet.circle.com`. Set `ARC_RPC_URL` / `ARC_CHAIN_ID` (`5042002`) and a funded `DEPLOYER_PRIVATE_KEY` in `.env`.
 2. Deploy the revenue split and set `REVENUE_SPLIT_ADDRESS`:
    ```bash
    npm run contracts:compile && npm run contracts:deploy
