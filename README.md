@@ -2,8 +2,6 @@
 
 ### *Pay-per-block reading for people and AI agents. The smallest unit of writing, finally sellable.*
 
-**Lepton Agents Hackathon · Canteen × Circle × Arc** — built for **RFB 6 (Creator & Publisher Monetization)**, with an autonomous paying agent for **RFB 1** and agent-skills sold per block for **RFB 2**.
-
 Skimflow makes the smallest unit of content — a single **block** (a few paragraphs, one image, one page of a book) — sellable on its own. Creators publish articles, photo essays, agent skills, and books behind an **x402** paywall; **both human readers and AI agents** pay **per block** (from $0.000001), settled gas-free as **USDC on Arc** through **Circle Gateway**, with an automatic **80/12/5/3** revenue split. The payment floor that forced everything into $10/month subscriptions is gone — so the lepton, the smallest coin, comes back as the nanopayment.
 
 For humans the crypto disappears: one tap sets up a session, and every block after unlocks **with no wallet popup**, drawn from a "reading fuel" gauge. For agents, three machine-readable endpoints turn the whole catalog into a pay-per-request API.
@@ -148,6 +146,4 @@ db/migrations   0001…0011 (users, pay-sessions, embedded wallets, settlement r
 
 Next.js 15 · React 19 · TypeScript · PostgreSQL (`pg`) · NextAuth · Tailwind (editorial design system) · LangChain.js (Groq / Claude) · RainbowKit + Wagmi / Viem · Solidity (Hardhat, OpenZeppelin) · **Circle Gateway (`/v1/x402/settle`, EIP-3009) · x402 · Circle embedded Wallets (W3S) · USDC on Arc**.
 
----
 
-*Built for the Lepton Agents Hackathon. Make the smallest unit sellable.*
