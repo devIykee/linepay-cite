@@ -20,6 +20,8 @@ export interface AgentSkillsOptions {
   slug: string;
   simulate: boolean;
   maxBlocks?: number;
+  /** Keep the unlocked block text on each trace (for synthesis). Off by default. */
+  includeText?: boolean;
 }
 
 export interface BlockTrace {
@@ -29,6 +31,8 @@ export interface BlockTrace {
   token?: string;
   cost?: string;
   chars?: number;
+  /** Unlocked block text — only populated when `includeText` is set. */
+  text?: string;
   rateRemaining?: string | null;
 }
 
@@ -220,6 +224,7 @@ export async function runAgentSkills(opts: AgentSkillsOptions): Promise<AgentSki
       token,
       cost,
       chars: text.length,
+      text: opts.includeText ? text : undefined,
       rateRemaining: paid.headers.get("x-ratelimit-remaining"),
     });
   }

@@ -62,6 +62,14 @@ export default function RichText({ source }: { source: string }) {
             </pre>
           ),
           hr: () => <hr className="my-6 border-outline-variant" />,
+          table: ({ children }) => (
+            <div className="my-4 overflow-x-auto">
+              <table className="w-full border-collapse text-left font-body-sm text-[14px]">{children}</table>
+            </div>
+          ),
+          thead: ({ children }) => <thead className="border-b border-outline">{children}</thead>,
+          th: ({ children }) => <th className="px-3 py-2 font-label-caps text-label-caps text-on-surface-variant">{children}</th>,
+          td: ({ children }) => <td className="border-b border-outline-variant px-3 py-2 align-top">{children}</td>,
         }}
       >
         {source}

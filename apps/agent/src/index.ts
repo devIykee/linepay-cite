@@ -6,9 +6,12 @@ export type {
   BlockTrace,
 } from "./agent-skills-client.js";
 
-// Legacy: the original line-based research flow. The line-based endpoints it
-// drove (/api/catalog, /api/content/:id) were removed in the chunk migration,
-// so these are retained for reference only and are no longer wired to the app.
-export { runResearch } from "./agent.js";
-export type { ResearchResult, AgentStep, Citation, RunOptions } from "./agent.js";
+// Autonomous multi-source research agent (current). Discovers the
+// /.well-known/agent-skills.json catalog, scores relevance, pays for the best
+// sources under a budget over x402, and synthesizes a cited answer.
+export { runResearch } from "./research.js";
+export type { ResearchResult, ResearchOptions, ResearchStep } from "./research.js";
+
+// Legacy: the original line-based research flow drove endpoints removed in the
+// chunk migration (/api/catalog, /api/content/:id). Kept for reference only.
 export { X402Client } from "./x402-client.js";

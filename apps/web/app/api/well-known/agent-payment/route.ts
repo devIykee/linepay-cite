@@ -13,8 +13,11 @@ export async function GET() {
   const gateway = gatewayAddressFor({ gateway_address: null });
   const costPerBlock = process.env.DEFAULT_PRICE_PER_BLOCK || "0.05";
 
+  const baseUrl = (process.env.NEXT_PUBLIC_APP_URL || "https://skimflow.vercel.app").replace(/\/$/, "");
   const manifest = {
     version: "1.1",
+    // Single entry point: an agent can hit this one URL to learn everything.
+    agent_entrypoint: `${baseUrl}/deploy`,
     // Primary protocol: x402 (HTTP 402 + X-Payment) settled over Circle Gateway.
     payment_protocol: "x402",
     settlement: "circle-gateway-eip3009",

@@ -8,6 +8,7 @@
   "exports": { ".": "./src/index.ts" },
   "scripts": {
     "agent": "tsx src/cli.ts",
+    "research": "tsx src/research-cli.ts",
     "circle": "tsx src/circle-pay.ts",
     "test:x402": "tsx src/test-x402.ts",
     "typecheck": "tsc --noEmit"

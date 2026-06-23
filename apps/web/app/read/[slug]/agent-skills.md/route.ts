@@ -181,8 +181,35 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: strin
   }
 
   // ── x402 path: real signed USDC payment via Circle Gateway ─────────────────
+  // payTo must be a real wallet. Resolve it the same way every other money path
+  // does — the creator's external `wallet_address` first, then their Circle
+  // embedded wallet — and if the creator has neither, route the payment to the
+  // PLATFORM RESERVE rather than ever the dead/burn address.
   const creator = await getUserById(content.creator_id);
-  const payTo = (validateWallet(creator?.wallet_address).checksummed ?? BURN) as Address;
+  let payTo = (validateWallet(creator?.wallet_address).checksummed ??
+    validateWallet(creator?.embedded_wallet_address).checksummed ??
+    null) as Address | null;
+  if (!payTo) {
+    const reserve = validateWallet(
+      process.env.PLATFORM_ADDRESS || process.env.PLATFORM_WALLET_ADDRESS
+    ).checksummed as Address | undefined;
+    if (reserve) {
+      console.warn(
+        `[agent-skills] creator ${content.creator_id} (slug=${slug}) has no payout wallet — defaulting payTo to the platform reserve.`
+      );
+      payTo = reserve;
+    }
+  }
+  if (!payTo) {
+    // No creator wallet AND no platform reserve configured — genuine misconfig.
+    console.error(`[agent-skills] no creator wallet and no PLATFORM_ADDRESS reserve (slug=${slug}) — refusing to quote.`);
+    return json({ error: "payout_unconfigured", message: "No payout wallet is configured for this skill." }, 500, rl);
+  }
+  // Safety net: a dead/burn address must never appear in a payment quote.
+  if (payTo.toLowerCase() === DEAD_ADDRESS.toLowerCase()) {
+    console.error(`[agent-skills] dead address resolved as payTo for slug=${slug} — refusing to quote.`);
+    return json({ error: "invalid_payout_wallet", message: "Payout wallet is invalid." }, 500, rl);
+  }
   const resource = `${baseUrl}/read/${content.slug}/agent-skills.md?block=${blockIndex}`;
 
   if (!xPayment) await record402Hit(id, content.id, blockIndex);
@@ -195,7 +222,7 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: strin
       resource,
       description: `Unlock block ${blockIndex} of "${content.title}" for ${content.price_per_block} USDC.`,
       blockIndex,
-      extraHeaders: rateLimitHeaders(rl),
+      extraHeaders: { ...rateLimitHeaders(rl), "X-Agent-Entrypoint": `${baseUrl}/deploy` },
     },
     // withGateway only invokes onPaid AFTER Circle confirms settlement, so the
     // payment is final here (live or simulate) — record it completed.
@@ -209,4 +236,5 @@ export async function GET(req: NextRequest, ctx: { params: Promise<{ slug: strin
   );
 }
 
-const BURN = "0x000000000000000000000000000000000000dEaD" as Address;
+// The dead/burn address — must NEVER appear as a payTo in a payment quote.
+const DEAD_ADDRESS = "0x000000000000000000000000000000000000dEaD" as Address;

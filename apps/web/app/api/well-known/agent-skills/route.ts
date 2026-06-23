@@ -31,12 +31,20 @@ export async function GET(req: NextRequest) {
 
   const rows = await listPublished({ contentType: "agent-skills", sort: "newest", limit, offset });
 
+  // Platform reserve — where a payment defaults when a creator has no wallet, so
+  // the catalog never advertises the dead/burn address (mirrors the .md route).
+  const reserve =
+    (validateWallet(process.env.PLATFORM_ADDRESS || process.env.PLATFORM_WALLET_ADDRESS).checksummed as string | undefined) ?? BURN;
+
   // Resolve each creator's payout wallet (the authoritative `pay_to` is also
   // returned in the 402 quote, but advertising it here saves a round-trip).
   const services = await Promise.all(
     rows.map(async (c) => {
       const creator = await getUserById(c.creator_id);
-      const payTo = validateWallet(creator?.wallet_address).checksummed ?? BURN;
+      const payTo =
+        validateWallet(creator?.wallet_address).checksummed ??
+        validateWallet(creator?.embedded_wallet_address).checksummed ??
+        reserve;
       const skillUrl = `${baseUrl}/read/${c.slug}/agent-skills.md`;
       return {
         name: c.title,

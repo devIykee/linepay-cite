@@ -1,127 +1,153 @@
-# Skimflow Cite 🪙📖
+# Skimflow 🪙📖
 
-### *Get paid every time someone reads a line of your story. Your readers pay per line — agents welcome.*
+### *Pay-per-block reading for people and AI agents. The smallest unit of writing, finally sellable.*
 
-**Lepton Agents Hackathon · Canteen × Circle × Arc** — built for **RFB 6 (Creator & Publisher Monetization)**, with an autonomous paying agent for **RFB 1**.
+**Lepton Agents Hackathon · Canteen × Circle × Arc** — built for **RFB 6 (Creator & Publisher Monetization)**, with an autonomous paying agent for **RFB 1** and agent-skills sold per block for **RFB 2**.
 
-Skimflow Cite makes the smallest unit of writing — a single line — sellable. Creators put an **x402** paywall on articles and light-novel chapters; **both human readers and AI agents** pay **per line** (from $0.000001), settled gas-free as **USDC on Arc** through **Circle Gateway**, with an automatic **85/10/5** revenue split. The payment floor that forced everything into $10/month subscriptions is gone — so the lepton, the smallest coin, comes back as the nanopayment.
+Skimflow makes the smallest unit of content — a single **block** (a few paragraphs, one image, one page of a book) — sellable on its own. Creators publish articles, photo essays, agent skills, and books behind an **x402** paywall; **both human readers and AI agents** pay **per block** (from $0.000001), settled gas-free as **USDC on Arc** through **Circle Gateway**, with an automatic **80/12/5/3** revenue split. The payment floor that forced everything into $10/month subscriptions is gone — so the lepton, the smallest coin, comes back as the nanopayment.
 
-Runs **end-to-end out of the box in simulate mode** (no keys), and flips to **real Arc testnet USDC** with a few env vars.
+For humans the crypto disappears: one tap sets up a session, and every block after unlocks **with no wallet popup**, drawn from a "reading fuel" gauge. For agents, three machine-readable endpoints turn the whole catalog into a pay-per-request API.
 
-> ⚠️ **Testnet only.** Everything in this repo targets **Circle's Arc testnet**. All USDC is **test USDC** (or the bundled `MockUSDC` faucet token) with no real-world value. All contracts deploy to testnet — the Hardhat config defines no mainnet, and every deploy script runs an `assertTestnet` guard that refuses known mainnet chain ids.
+Runs **end-to-end out of the box in simulate mode** (no keys, no funds), and flips to **real Arc testnet USDC** with a few env vars.
+
+🔗 **Live:** [skimflow.vercel.app](https://skimflow.vercel.app)
+
+📚 **Docs:** [Creator guide](https://skimflow.vercel.app/docs) · [Partners & Developers](https://skimflow.vercel.app/partners) ([md](docs/PARTNERS.md)) · [White paper](https://skimflow.vercel.app/whitepaper) ([md](docs/WHITEPAPER.md)) · [Circle tooling feedback](CIRCLE_FEEDBACK.md)
+
+> ⚠️ **Testnet only.** Everything targets **Circle's Arc testnet** (chain id `5042002`). All USDC is **test USDC** with no real-world value. Contracts deploy to testnet only; every deploy script runs an `assertTestnet` guard that refuses known mainnet chain ids.
 
 ---
 
 ## Quick start (one command)
 
-> Requires Node ≥ 20.6.
+> Requires Node ≥ 20.6 and Docker (for the local Postgres — auto-started if you have no `DATABASE_URL`).
 
 ```bash
-cd lepton-skimflow-cite
-bash scripts/setup.sh
-```
-
-Installs deps, starts the server, seeds **4 creators / 8 articles / 2 novel chapters**, and generates demo traffic (human reads + agent runs) so the dashboards are already live. Then open:
-
-- **http://localhost:3000/read** — read an article, hit the paywall, **pay per line** (you are the reader).
-- **http://localhost:3000/demo** — type a query, **watch the agent pay** creators autonomously.
-- **http://localhost:3000/creators** — pick a creator, see **earnings update in real time**.
-
-CLI agent (full reasoning trace in your terminal):
-
-```bash
-npm run agent -- "How do nanopayments change online writing?"
-npm run agent -- "continue reading The Clockwork Archive"
-```
-
-Manual setup:
-
-```bash
-cp .env.example .env && cp .env apps/web/.env.local
+cd lepton-linepay-cite
 npm install
-npm run dev          # terminal 1
-npm run seed         # terminal 2 (server must be running)
-npm run demo:traffic # optional — populate traction
+npm run up            # ensures a DB, migrates, seeds demo content, starts the server
+```
+
+`npm run up` is zero-config: if `DATABASE_URL` isn't set, it boots a local Postgres in Docker; if it is (e.g. Supabase), it uses that and skips Docker. Then open:
+
+- **http://localhost:3000/for-you** — the feed: articles, agent skills, Skimflow photo essays, and books.
+- **http://localhost:3000/read/&lt;slug&gt;** — read a piece, hit the paywall, unlock block-by-block (you are the reader).
+- **http://localhost:3000/dashboard** — publish content, watch earnings, manage your wallet.
+- **http://localhost:3000/docs** — the creator + agent-integration guide.
+
+Useful variants:
+
+```bash
+npm run up:fresh                 # reset the local Docker DB + .next, then start
+bash scripts/dev.sh --traffic    # also generate simulate-mode demo unlocks (off by default)
+npm run db:seed:chioma           # add the @chiomawrites sample set (articles, skills, 2 books, photo essays)
+```
+
+Drive the **buyer agent** against your running server (full reasoning + payment trace):
+
+```bash
+npm run agent -- --url http://localhost:3000 --slug <agent-skill-slug> --simulate
+npm run test:x402 -- --url http://localhost:3000 --slug <agent-skill-slug> --simulate   # spec-compliance harness
 ```
 
 ---
 
-## Going live on Arc testnet (Canteen + Circle tooling)
+## What you can publish
 
-One command installs the CLIs and prints the wallet/faucet steps:
-```bash
-npm run circle:setup     # installs @circle-fin/cli + the ARC CLI, guides wallet + faucet
-```
-Then, step by step:
+| Type | Unit sold | Reader experience |
+|---|---|---|
+| **Article** | a chunk (~6 lines / 400 words) | vertical reader; block 0 free, the rest blur until unlocked |
+| **Agent Skills** | a skill block | a `.md` endpoint agents pay per block to read (RFB 2) |
+| **Skimflow** | one image | a photo essay; first image free, each next image is a paid unlock |
+| **Book** | one page | full-screen Moon+-style reader (chapters → pages), swipe/keys to turn |
 
-1. **ARC CLI** (Canteen-hosted Arc testnet RPC + docs bundled for your coding agent):
-   ```bash
-   uv tool install git+https://github.com/the-canteen-dev/ARC-cli
-   ```
-   Put the RPC URL + chain id into `.env` (`ARC_RPC_URL`, `ARC_CHAIN_ID`). Docs: `arc-node.thecanteenapp.com` · `docs.arc.network`.
-2. **Circle Gateway** — the integration follows Circle's real API and the official SDK (the `circlefin/arc-nanopayments` pattern):
-   - **Settlement:** `POST /v1/x402/settle` on `https://gateway-api-testnet.circle.com` with `{ paymentPayload, paymentRequirements }` → `{ success, transaction, payer, network }` (`packages/sdk/src/gateway.ts`).
-   - **Signing:** buyer signs an **EIP-3009** `TransferWithAuthorization` against the `GatewayWalletBatched` v1 EIP-712 domain (`validBefore` ≥ 7 days), zero gas; Gateway batches the on-chain settlement.
-   - **Official SDK** (recommended): `@circle-fin/x402-batching` — buyer `GatewayClient({ chain: "arcTestnet", privateKey }).pay(url)`, seller `BatchFacilitatorClient.settle(...)`. Wrapped at `apps/agent/src/circle-gateway.ts`; drive it with `npm run circle -- pay|deposit|balances`.
-   ```bash
-   npm install -g @circle-fin/cli        # Node ≥ 20.18.2 — agent wallets + faucet + x402
-   ```
-   Set `CIRCLE_API_KEY`, `CIRCLE_CHAIN=arcTestnet`, and create funded `BUYER_*` / `SELLER_*` wallets. Docs: `developers.circle.com/gateway/nanopayments` · `developers.circle.com/agent-stack`.
-3. **Deploy the revenue split:**
-   ```bash
-   npm run contracts:compile && npm run contracts:deploy   # prints REVENUE_SPLIT_ADDRESS
-   ```
-   Add `REVENUE_SPLIT_ADDRESS` to `.env` to route payments through the on-chain 85/10/5 split.
-4. **Flip the switch:** `PAYMENTS_MODE=live`. Restart. Payments now settle real **test** USDC on Arc, gas-free via Circle Gateway.
-
-The same code path runs in both modes — only `PAYMENTS_MODE` + the Circle/Arc vars differ (`packages/sdk/src/{arc,gateway}.ts`). Default `gateway-api-testnet.circle.com`; the official SDK resolves Arc config from the named chain `arcTestnet`.
-
-> 🔐 **Never commit or paste API keys.** `CIRCLE_API_KEY` lives only in `.env` (gitignored). If a key is ever exposed, rotate it in the Circle console.
+The first block of anything is a **free preview**. The only price ever shown to a human is the optional **"unlock the whole piece"** upsell (a 5% bulk discount); per-block unlocks just say **"Read on."**
 
 ---
 
-## On-chain Agent Marketplace (RainbowKit / Wagmi)
+## How payments work
 
-Alongside the off-chain x402 nanopayment flow, there's a **fully on-chain marketplace** for AI agent skills, prompts, and knowledge bases — real reads, writes, and events via Wagmi/Viem, **no mock data**.
+**Silent per-block payments (humans).** A reader does a **one-time setup**: deposit USDC into their Circle **Gateway** balance and `addDelegate` a locally-generated **session key**. After that, each block unlocks by having the session key sign an EIP-712 **burn intent** that a relayer settles through Gateway — **no wallet popup per block**. The UI shows a **"reading fuel"** battery gauge (a friendly face over the raw USDC balance), warns when it runs low, and offers a one-tap top-up. End the session anytime; the Gateway balance stays put and "Read on" silently resumes against it.
 
-- **Contract:** `contracts/contracts/AgentMarketplace.sol` — `publishContent` / `buyContent(id)` (USDC `transferFrom` buyer→author via SafeERC20 + ReentrancyGuard), on-chain `hasPurchased` access mapping, and `ContentPublished` / `ContentPurchased` events agents listen to for discovery. `MockUSDC.sol` (6-decimal faucet token) is included for testnets without a canonical USDC.
-- **Frontend:** `/market` — RainbowKit wallet connect, the feed reads `getAllContent()` and auto-refetches on events, the unlock flow does **allowance check → `approve` → `buyContent`**, and content is revealed only after a signature + on-chain `hasAccess` check (`/api/reveal`). Publishing encrypts the body (AES-256-GCM), stores it on **IPFS via Pinata** (or local SQLite fallback), and writes the CID on-chain.
-- **Key files:** `lib/wagmi.ts` (Arc chain + RainbowKit config), `app/providers.tsx`, `hooks/useMarketplace.ts`, `lib/marketplaceAbi.ts`, `lib/{ipfs,crypto}.ts`, `app/api/{ipfs,reveal}/route.ts`.
+**Wallets.** Signed-in readers get a **Circle embedded wallet** (W3S, PIN-secured, no download) by default; power users can connect an **external wallet** (RainbowKit/Wagmi). The silent-pay path is identical for both.
 
-**Deploy (Hardhat → Arc testnet — test tokens only):**
+**Revenue split — 80/12/5/3.** Every payment splits **creator 80% · platform 12% · referrer 5% · reserve 3%**, routed on-chain through the `RevenueSplit` contract. With no referrer it's **80/12/0/8** (the referrer's share rolls into reserve). Creators (and admins) read their own work free.
 
-First provision a funded testnet key + RPC with the Canteen ARC CLI, and set `ARC_RPC_URL` / `ARC_CHAIN_ID` / `DEPLOYER_PRIVATE_KEY` in `.env`:
-```bash
-uv tool install git+https://github.com/the-canteen-dev/ARC-cli
-```
-```bash
-cd contracts && npm install
-# test USDC faucet token (skip if the Arc testnet already exposes a USDC):
-npm run deploy:mock-usdc                          # → <usdc>   (TEST token)
-USDC_ADDRESS=<usdc> npm run deploy:marketplace    # → <marketplace>  (on arcTestnet)
-# then in apps/web/.env.local:
-#   NEXT_PUBLIC_USDC_ADDRESS=<usdc>
-#   NEXT_PUBLIC_MARKETPLACE_ADDRESS=<marketplace>
-#   NEXT_PUBLIC_ARC_RPC_URL / NEXT_PUBLIC_ARC_CHAIN_ID / NEXT_PUBLIC_WC_PROJECT_ID
-```
-The `…:marketplace` / `…:mock-usdc` scripts target `--network arcTestnet`; append `:local` (e.g. `deploy:marketplace:local`) for an in-memory dry run. Every deploy runs an `assertTestnet` guard. The `/market` page shows a setup screen until those are configured; the per-line `/read` + `/demo` flows work without any of it. In the wallet, the on-chain marketplace mints **test USDC** via the in-app faucet button.
+**Simulate vs live.** The same code path runs in both modes; only `PAYMENTS_MODE` + the Circle/Arc env vars differ. Simulate needs no keys or funds (great for review); live settles **real test USDC** on Arc.
 
-**Routes:** `/` · `/read` (library) · `/content/[id]` (per-item reader — prose for articles, **locked code-block** for agent-skills/prompts) · `/market` (on-chain) · `/creators` · `/demo` · **`/docs`** (creator + agent-integration guide).
+---
+
+## For AI agents (x402)
+
+Agents discover and pay for content without scraping the HTML, via three endpoints:
+
+| Endpoint | What it is |
+|---|---|
+| `/deploy` | **single entry point** — hit this one URL and you have everything: protocol, catalog, manifest, and a worked example. JSON by default, HTML in a browser. |
+| `/.well-known/agent-payment.json` | **how to pay** — protocol (`x402`), settlement (`circle-gateway-eip3009`), network (`eip155:5042002`), USDC + gateway addresses, the `GatewayWalletBatched` EIP-712 domain |
+| `/.well-known/agent-skills.json` | **what's for sale** — a machine-readable catalog of agent skills: slug, price, payable blocks, `preview_url`, `resource_url_pattern`, `pay_to` |
+| `/read/{slug}/agent-skills.md` | the resource itself — **block 0 free**; `?block=n` (n ≥ 1) returns a **402 quote**, then the unlocked block once an `X-Payment` header is supplied |
+
+The flow is the canonical x402 loop: **GET → 402 quote → sign EIP-3009 / build burn intent → retry with `X-Payment` → 200 + content**, with an `X-Payment-Response` receipt. Every Agent Skill card in the feed and on the detail page has a **"Share with Agent"** button that copies this exact payload for pasting into an agent's context.
+
+**The buyer agent** (`apps/agent`, LangChain) runs the loop autonomously under a **Guardian spend policy** (`packages/sdk/src/guardian.ts`) — it clears every payment through `checkPolicy` (per-purchase + total budget) before it pays. `npm run test:x402` asserts spec-compliance at each step and exits non-zero on failure (CI-friendly).
+
+---
+
+## Routes
+
+`/` · `/for-you` (feed) · `/read/[slug]` (reader — articles, agent-skills, Skimflow, books) · `/dashboard` (publish / earnings / wallet) · `/dashboard/create-book` (chapter builder) · `/dashboard/settings` · `/docs` · `/marketplace` · `/login` · `/terms` · `/admin/*` (moderation, payments, users, wallets, agents)
 
 ## API reference (selected)
 
 | Method | Route | Purpose |
 |---|---|---|
-| `GET` | `/api/content/:id?lineStart&lineEnd` | x402-protected per-line read (402 → pay → 200) |
-| `GET` | `/api/content/:id/meta` | reader metadata + free preview |
-| `POST` | `/api/reader/:id` | human pay-per-line settlement |
-| `POST` | `/api/research` | ⭐ run the autonomous buyer agent |
-| `POST` | `/api/content` · `/api/creators` | publish content · register creator |
-| `GET` | `/api/creators/:handle/earnings` · `/api/feed` · `/api/stats` | dashboards + live feed + traction |
-| `GET/PUT` | `/api/policy` | Guardian policy |
+| `POST` | `/api/reader/:slug` | per-block unlock: quote → settle (silent session-key, direct tx, or whole-piece) |
+| `GET` | `/read/:slug/agent-skills.md?block=n` | x402-protected agent read (402 → pay → 200) |
+| `GET` | `/.well-known/agent-payment.json` · `/.well-known/agent-skills.json` | agent discovery: how to pay · what's for sale |
+| `POST` | `/api/pay-session/init` · `/resume` · `/revoke` · `GET /balance` | reading-fuel session lifecycle |
+| `GET` | `/api/wallet/overview` · `/api/wallet/balance` | wallet balances + history; deposit-notification poll |
+| `POST` | `/api/wallet/embedded` · `/embedded/setup` · `/embedded/confirm` | Circle embedded-wallet provisioning |
+| `POST` | `/api/creator/content` · `PATCH/GET/DELETE /api/creator/content/:id` | publish / edit / load / remove content |
+| `POST` | `/api/import-url` | import a Medium article or GitHub `.md` skill |
+| `GET` | `/api/marketplace` · `/api/marketplace/search` | feed listing + search |
+| `POST` | `/api/webhooks/circle` | Circle settlement webhook (finalizes pending live payments) |
+
+## Going live on Arc
+
+1. Provision a funded Arc testnet key + RPC (Canteen ARC CLI), get test USDC from `faucet.circle.com`:
+   ```bash
+   uv tool install git+https://github.com/the-canteen-dev/ARC-cli
+   ```
+   Set `ARC_RPC_URL` / `ARC_CHAIN_ID` (`5042002`) in `.env`.
+2. Deploy the revenue split and set `REVENUE_SPLIT_ADDRESS`:
+   ```bash
+   npm run contracts:compile && npm run contracts:deploy
+   ```
+   (A `RevenueSplit` is already live on Arc testnet at `0xBe1b9f844341701c36ee86F5248a0f9F1628C1E4`.)
+3. Configure Circle Gateway: `CIRCLE_API_KEY`, the relayer / seller keys, and the Gateway base `https://gateway-api-testnet.circle.com`. Settlement uses `POST /v1/x402/settle` with EIP-3009 authorizations against the `GatewayWalletBatched` v1 domain (`packages/sdk/src/gateway.ts`).
+4. Flip the switch: `PAYMENTS_MODE=live` and `NEXT_PUBLIC_PAYMENTS_MODE=live`. Restart. Payments now settle real **test** USDC on Arc, gas-free via Gateway.
+
+> 🔐 **Never commit or paste API keys / private keys.** Secrets live only in the gitignored repo-root `.env` (`apps/web/.env.local` is a symlink to it). Rotate any exposed key in the Circle console.
+
+## Architecture
+
+```
+apps/web        Next.js 15 (App Router, React 19) · Postgres · NextAuth · Tailwind design tokens
+                ├─ silent per-block pay sessions (Gateway burn intents)
+                ├─ Circle embedded wallets (W3S) + external (RainbowKit/Wagmi)
+                ├─ x402 well-known endpoints + agent-skills.md resource
+                └─ creator dashboard, Books builder, admin/moderation suite
+apps/agent      LangChain buyer agent · x402 client · Guardian spend policy · test:x402 harness
+packages/sdk    arc · gateway (x402 /v1/x402/settle, EIP-3009) · guardian · x402 · pricing
+contracts       RevenueSplit.sol (live 80/12/5/3 router) · AgentMarketplace.sol · MockUSDC.sol (Hardhat)
+db/migrations   0001…0011 (users, pay-sessions, embedded wallets, settlement retry, reports, images, books)
+```
 
 ## Tech stack
 
-Next.js 15 · TypeScript · LangChain.js (Groq / Claude / heuristic) · RainbowKit + Wagmi/Viem · better-sqlite3 · Solidity (Hardhat, OpenZeppelin) · Tailwind (editorial design system) · **Circle Gateway (`@circle-fin/x402-batching`) · x402 (`/v1/x402/settle`, EIP-3009) · USDC on Arc · Circle Agent Stack + Circle CLI**.
+Next.js 15 · React 19 · TypeScript · PostgreSQL (`pg`) · NextAuth · Tailwind (editorial design system) · LangChain.js (Groq / Claude) · RainbowKit + Wagmi / Viem · Solidity (Hardhat, OpenZeppelin) · **Circle Gateway (`/v1/x402/settle`, EIP-3009) · x402 · Circle embedded Wallets (W3S) · USDC on Arc**.
 
 ---
+
+*Built for the Lepton Agents Hackathon. Make the smallest unit sellable.*
