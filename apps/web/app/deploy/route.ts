@@ -17,13 +17,39 @@ export async function GET(req: NextRequest) {
 
   const base = (process.env.NEXT_PUBLIC_APP_URL || req.nextUrl.origin).replace(/\/$/, "");
 
-  // Use a real, live agent-skill slug for the worked example when one exists.
+  // Use a real, live agent-skill slug for the worked example, and derive a
+  // price hint so an agent knows the cost order of magnitude before it even
+  // hits the catalog. Falls back gracefully if the DB is unavailable.
   let exampleSlug = "revising-a-time-loop-narrative";
+  const defaultPrice = process.env.DEFAULT_PRICE_PER_BLOCK || "0.05";
+  let pricing: {
+    currency: string;
+    model: string;
+    free_preview: string;
+    min_per_block: string;
+    max_per_block: string;
+    note: string;
+  } = {
+    currency: "USDC",
+    model: "per_block",
+    free_preview: "block 0 of every skill is free",
+    min_per_block: defaultPrice,
+    max_per_block: defaultPrice,
+    note: "Exact price is in each skill's catalog entry and its 402 quote.",
+  };
   try {
-    const rows = await listPublished({ contentType: "agent-skills", sort: "newest", limit: 1 });
+    const rows = await listPublished({ contentType: "agent-skills", sort: "newest", limit: 50 });
     if (rows[0]?.slug) exampleSlug = rows[0].slug;
+    const prices = rows.map((r) => Number(r.price_per_block)).filter((n) => Number.isFinite(n) && n >= 0);
+    if (prices.length) {
+      pricing = {
+        ...pricing,
+        min_per_block: Math.min(...prices).toFixed(6).replace(/\.?0+$/, ""),
+        max_per_block: Math.max(...prices).toFixed(6).replace(/\.?0+$/, ""),
+      };
+    }
   } catch {
-    /* fall back to the seeded example slug */
+    /* fall back to the seeded example slug + default price */
   }
 
   const manifest = `${base}/.well-known/agent-payment.json`;
@@ -35,10 +61,12 @@ export async function GET(req: NextRequest) {
     platform: "Skimflow",
     description:
       "A pay-per-block content platform. AI agents can discover and purchase knowledge skills using x402 (HTTP 402 + X-Payment header) settled as USDC on Circle Gateway.",
-    protocol: "x402 v2",
+    protocol: "x402",
+    x402_version: 2,
     network: "eip155:5042002 (Arc Testnet)",
     asset: "USDC",
-    agent_entrypoint: `${base}/deploy`,
+    base_url: base,
+    pricing,
     how_it_works: [
       "1. GET /deploy (you are here) — read this to understand the platform",
       "2. GET /.well-known/agent-skills.json — browse the full skills catalog",
@@ -104,7 +132,8 @@ function renderHtml(b: ReturnType<typeof Object> & Record<string, any>): string 
 <body>
   <h1>🪙 Skimflow — Agent Entry Point</h1>
   <p class="sub">${esc(b.description)}</p>
-  <p><span class="badge">${esc(b.protocol)}</span> &nbsp; <span class="badge">${esc(b.network)}</span> &nbsp; <span class="badge">${esc(b.asset)}</span></p>
+  <p><span class="badge">${esc(b.protocol)} v${esc(String(b.x402_version))}</span> &nbsp; <span class="badge">${esc(b.network)}</span> &nbsp; <span class="badge">${esc(b.asset)}</span></p>
+  <p class="sub">Pricing: ${esc(b.pricing.model)} in ${esc(b.pricing.currency)} — ${esc(b.pricing.min_per_block)}–${esc(b.pricing.max_per_block)} per block; ${esc(b.pricing.free_preview)}.</p>
 
   <p><strong>${esc(b.readme)}</strong></p>
 

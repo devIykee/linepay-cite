@@ -39,6 +39,7 @@ Useful variants:
 npm run up:fresh                 # reset the local Docker DB + .next, then start
 bash scripts/dev.sh --traffic    # also generate simulate-mode demo unlocks (off by default)
 npm run db:seed:chioma           # add the @chiomawrites sample set (articles, skills, 2 books, photo essays)
+npm run db:purge-demo            # DRY RUN: show all demo/seed data; add `-- --yes` to delete it
 ```
 
 Drive the **buyer agent** against your running server (full reasoning + payment trace):
