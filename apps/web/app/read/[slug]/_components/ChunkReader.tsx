@@ -75,6 +75,8 @@ interface Props {
   /** The viewer is this piece's creator (or an admin): read in full, free, with
    *  an Edit link and no paywall chrome. */
   isOwner?: boolean;
+  /** Content id — used to deep-link the owner straight into the editor. */
+  contentId?: string;
   chunks: ChunkView[];
 }
 
@@ -684,7 +686,10 @@ export default function ChunkReader(props: Props) {
             <span className="material-symbols-outlined text-[18px]">edit_note</span>
             This is your piece, so every block is unlocked for you.
           </span>
-          <Link href="/dashboard" className="font-label-caps text-label-caps text-primary hover:underline">
+          <Link
+            href={props.contentId ? `/dashboard?edit=${props.contentId}` : "/dashboard"}
+            className="font-label-caps text-label-caps text-primary hover:underline"
+          >
             Edit in dashboard →
           </Link>
         </div>

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useToast } from "@/components/Toaster";
 import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
@@ -80,6 +80,21 @@ export default function ContentManager({ impersonating }: { impersonating: boole
       .catch(() => {});
   }, []);
   useEffect(loadList, [loadList]);
+
+  // Deep-link from a reader's "Edit in dashboard" link (/dashboard?edit=<id>):
+  // auto-open that piece in the editor, then strip the param so a refresh won't
+  // re-trigger it. Runs once on mount.
+  const editParamHandled = useRef(false);
+  useEffect(() => {
+    if (editParamHandled.current || typeof window === "undefined") return;
+    const id = new URLSearchParams(window.location.search).get("edit");
+    if (!id) return;
+    editParamHandled.current = true;
+    void startEdit(id);
+    window.history.replaceState(null, "", window.location.pathname);
+    // startEdit is a stable function declaration; run only on mount.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Live commission + chunk preview.
   useEffect(() => {

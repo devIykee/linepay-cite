@@ -114,6 +114,7 @@ export default async function ReaderPage({ params }: { params: Promise<{ slug: s
           creatorHandle={content.creator_handle}
           pricePerBlock={content.price_per_block}
           isOwner={isOwner}
+          contentId={content.id}
           chapters={chapters.map((ch) => ({ id: ch.id, index: ch.chapter_index, title: ch.title }))}
           pages={chunks.map((c) => ({
             id: c.id,
@@ -138,6 +139,7 @@ export default async function ReaderPage({ params }: { params: Promise<{ slug: s
         contentType={content.content_type}
         pricePerBlock={content.price_per_block}
         isOwner={isOwner}
+        contentId={content.id}
         verifiedSource={content.ownership_verified ? (content.source_platform ?? "source") : null}
         agentUrl={content.content_type === "agent-skills" ? `/read/${content.slug}/agent-skills.md` : null}
         chunks={chunks.map((c) => ({

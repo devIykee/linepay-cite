@@ -34,6 +34,8 @@ interface Props {
   pages: PageView[];
   /** Viewer owns this book (creator/admin): every page free, no paywall. */
   isOwner?: boolean;
+  /** Content id (accepted for parity with the article reader; unused here). */
+  contentId?: string;
 }
 
 const SWIPE_THRESHOLD = 50;
@@ -59,6 +61,10 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
   const hydratedRef = useRef(false);
 
   const [sessionActive, setSessionActive] = useState(false);
+  // Main wallet recorded in the active pay-session. With a live session we can pay
+  // from this directly — no need to wait on the wallet hook (which may be null
+  // when the reader set fuel up with an external wallet and isn't signed in).
+  const [sessionWallet, setSessionWallet] = useState<Address | null>(null);
   const [showSetup, setShowSetup] = useState(false);
   const [pendingBlock, setPendingBlock] = useState<number | null>(null);
   const [pendingWhole, setPendingWhole] = useState(false);
@@ -69,13 +75,16 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
   const embeddedAddr = embedded.status?.hasWallet ? (embedded.status.address as Address | null) : null;
   const effectiveWallet = (address ?? embeddedAddr ?? undefined) as Address | undefined;
   const walletKind: "external" | "embedded" | null = address ? "external" : embeddedAddr ? "embedded" : null;
-  const hasWallet = !!effectiveWallet;
   // Embedded-wallet status loads async (null until the GET resolves). During that
   // window we must NOT treat the reader as wallet-less — doing so wrongly popped
   // the "connect a wallet" gate on a page turn for users who already had an
   // embedded wallet. Mirror ChunkReader: only gate once we're sure there's none.
   const walletLoading = !address && embedded.status === null;
   const canCreateEmbedded = embedded.status?.enabled === true && embedded.status?.isAdmin === false;
+  // The wallet we actually pay from: the connected/embedded wallet if known,
+  // otherwise the main wallet from the active session. Either is enough to sign
+  // silent burns, so a funded reader can always turn the page.
+  const payWallet = (effectiveWallet ?? sessionWallet ?? undefined) as Address | undefined;
 
   const touchStartX = useRef<number | null>(null);
 
@@ -157,7 +166,10 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
       try {
         const res = await fetch("/api/pay-session/balance", { cache: "no-store" });
         const data = await res.json();
-        if (!cancelled) setSessionActive(!!data.active);
+        if (!cancelled) {
+          setSessionActive(!!data.active);
+          if (data.active && data.mainWallet) setSessionWallet(data.mainWallet as Address);
+        }
       } catch {
         /* ignore */
       }
@@ -211,15 +223,15 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
    * still a delegate. Returns true if a session was restored.
    */
   async function tryResume(): Promise<boolean> {
-    if (!effectiveWallet) return false;
-    const acct = loadSessionAccount(effectiveWallet);
+    if (!payWallet) return false;
+    const acct = loadSessionAccount(payWallet);
     if (!acct) return false;
     try {
       const res = await fetch("/api/pay-session/resume", {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
-          mainWallet: effectiveWallet,
+          mainWallet: payWallet,
           sessionAddress: acct.address,
           source: walletKind === "embedded" ? "embedded" : "external",
         }),
@@ -238,8 +250,10 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
 
   /** Pay for a single page silently, then turn to it. */
   async function payPage(blockIndex: number, opts?: { sessionReady?: boolean }) {
-    if (!hasWallet) {
-      // Still resolving whether they have an embedded wallet — don't gate yet.
+    // With an active session we already have a pay wallet (from the session), so
+    // a funded reader never hits this gate. Only block when there's genuinely no
+    // wallet to pay from — and stay quiet while the wallet hook is still loading.
+    if (!payWallet) {
       if (walletLoading) {
         toast("info", "Checking your wallet…");
         return;
@@ -263,9 +277,8 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
         return;
       }
       if (!quote.needsPayment) throw new Error(quote.friendly ?? quote.error ?? "Couldn't price this page.");
-      if (!effectiveWallet) return;
       const sessionPayment = await buildSessionPayment({
-        mainWallet: effectiveWallet,
+        mainWallet: payWallet,
         recipient: quote.sessionRecipient,
         value: BigInt(quote.requirements.amount),
       });
@@ -302,6 +315,13 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
     if (idx >= 0) setCurrent(idx);
   }
 
+  // `goNext` is memoized (keyboard/swipe handlers depend on it), so it would
+  // otherwise capture a stale `payPage` from an early render — before the wallet
+  // hook or the session wallet resolved — and keep showing "Checking your wallet"
+  // forever. Route through a ref that always points at the latest `payPage`.
+  const payPageRef = useRef(payPage);
+  payPageRef.current = payPage;
+
   const goPrev = useCallback(() => {
     setChapterListOpen(false);
     setCurrent((c) => Math.max(0, c - 1));
@@ -315,7 +335,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
     if (isPageUnlocked(p)) {
       setCurrent(target);
     } else {
-      void payPage(p.blockIndex);
+      void payPageRef.current(p.blockIndex);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [current, pages, isPageUnlocked]);
@@ -332,7 +352,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
 
   /** Whole-book purchase — unlock every page in one silent payment. */
   async function unlockWhole(opts?: { sessionReady?: boolean }) {
-    if (!hasWallet) {
+    if (!payWallet) {
       if (walletLoading) {
         toast("info", "Checking your wallet…");
         return;
@@ -357,9 +377,9 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
         })
       ).json();
       if (!quote.needsPayment) throw new Error(quote.friendly ?? quote.error ?? "Couldn't price this book.");
-      if (!effectiveWallet) return;
+      if (!payWallet) return;
       const sessionPayment = await buildSessionPayment({
-        mainWallet: effectiveWallet,
+        mainWallet: payWallet,
         recipient: quote.sessionRecipient,
         value: BigInt(quote.requirements.amount),
       });
@@ -521,7 +541,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
         {/* No-wallet gate (shown over the surface when the next page needs paying).
             Suppressed while embedded-wallet status is still loading and for owners
             (who read free), so it only appears for genuinely wallet-less readers. */}
-        {!hasWallet && !walletLoading && !isOwner && current + 1 < pages.length && !isPageUnlocked(pages[current + 1]) && chromeVisible && (
+        {!payWallet && !walletLoading && !isOwner && current + 1 < pages.length && !isPageUnlocked(pages[current + 1]) && chromeVisible && (
           <div className="absolute inset-x-0 bottom-24 z-30 mx-auto flex max-w-sm flex-col items-center gap-2 rounded-xl border border-outline-variant bg-surface-container-high p-4 text-center shadow-lg">
             <p className="font-body-sm text-[13px] text-on-surface-variant">Create your free wallet to keep reading.</p>
             {canCreateEmbedded && (
@@ -540,7 +560,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
           chromeVisible ? "translate-y-0" : "translate-y-full"
         }`}
       >
-        {!isOwner && !allUnlocked && payable.length > 0 && hasWallet && (
+        {!isOwner && !allUnlocked && payable.length > 0 && payWallet && (
           <button
             onClick={() => unlockWhole()}
             disabled={paying !== null}
@@ -563,7 +583,7 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
           </div>
           <span className="flex items-center gap-1.5 font-data-mono">
             Page {current + 1} of {pages.length}
-            {hasWallet && !isOwner && (
+            {payWallet && !isOwner && (
               <>
                 <span aria-hidden>·</span>
                 <ReadingFuel variant="inline" pricePerBlock={pricePerBlock} onTopUp={() => setShowSetup(true)} />

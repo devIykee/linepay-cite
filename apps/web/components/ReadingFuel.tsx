@@ -160,8 +160,9 @@ export default function ReadingFuel({ pricePerBlock, onTopUp, variant = "pill" }
         <>
           {/* Tap-outside catcher. */}
           <span className="fixed inset-0 z-[60]" onClick={() => setExpanded(false)} aria-hidden />
-          {/* Floating pill, anchored to the number. */}
-          <span className="absolute right-0 top-full z-[61] mt-2 whitespace-nowrap">{pill}</span>
+          {/* Floating pill, anchored ABOVE the number — the % usually sits in the
+              bottom chrome, so opening downward would run off the viewport. */}
+          <span className="absolute bottom-full right-0 z-[61] mb-2 whitespace-nowrap">{pill}</span>
         </>
       )}
     </span>
