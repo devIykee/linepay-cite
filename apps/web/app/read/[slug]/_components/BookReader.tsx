@@ -506,7 +506,9 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
             const text = pageText(p);
             return (
               <div key={p.id} className="h-full w-full shrink-0 overflow-y-auto">
-                <div className="mx-auto max-w-2xl px-6 py-20 md:py-24">
+                {/* Extra bottom padding (plus safe-area) so the last lines clear
+                    the bottom chrome and never fall under the screen edge. */}
+                <div className="mx-auto max-w-2xl px-6 pt-20 pb-[max(9rem,calc(env(safe-area-inset-bottom)+8rem))] md:pt-24 md:pb-44">
                   {text != null ? (
                     <RichText source={text} />
                   ) : (

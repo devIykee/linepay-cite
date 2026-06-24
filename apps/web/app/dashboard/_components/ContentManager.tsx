@@ -7,6 +7,7 @@ import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
 import { autoChunkArticle } from "@/lib/chunk-content";
 import { normalizeImageUrl, MAX_SKIMFLOW_IMAGES, MAX_CAPTION_CHARS } from "@/lib/image-links";
 import { formatUsdc } from "@/lib/money";
+import { queueRequest } from "@/lib/offline-drafts";
 
 interface ContentRow {
   id: string;
@@ -224,6 +225,24 @@ export default function ContentManager({ impersonating }: { impersonating: boole
   }
 
   async function publish(status: "draft" | "published") {
+    // Offline + saving a draft → queue it for Background Sync instead of failing.
+    // (Publishing offline isn't supported — it needs the live feed/settlement.)
+    if (status === "draft" && typeof navigator !== "undefined" && !navigator.onLine) {
+      try {
+        const url = editingId ? `/api/creator/content/${editingId}` : "/api/creator/content";
+        const method = editingId ? "PATCH" : "POST";
+        const reqBody = editingId
+          ? { title, body: contentType === "picture" ? undefined : body, pricePerBlock: price, summary, tags, status: "draft" }
+          : { title, contentType, body: contentType === "picture" ? "" : body, images: contentType === "picture" ? images : undefined, pricePerBlock: price, summary, tags, status: "draft", sourceUrl };
+        await queueRequest({ url, method, body: JSON.stringify(reqBody), label: title || "Untitled draft" });
+        toast("info", "You're offline — draft saved on this device and will sync automatically when you're back online.");
+        resetEditor();
+      } catch {
+        toast("error", "Couldn't save the draft offline.");
+      }
+      return;
+    }
+
     setBusy(true);
     setPublished(null);
     try {

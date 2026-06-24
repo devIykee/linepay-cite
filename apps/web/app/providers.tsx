@@ -9,6 +9,7 @@ import { RainbowKitProvider, lightTheme, darkTheme } from "@rainbow-me/rainbowki
 import { wagmiConfig } from "@/lib/wagmi";
 import { ToastProvider } from "@/components/Toaster";
 import DepositWatcher from "@/components/DepositWatcher";
+import ServiceWorkerRegister from "@/components/ServiceWorkerRegister";
 
 /**
  * Client provider tree for the on-chain marketplace. Wraps the whole app so the
@@ -45,6 +46,7 @@ export default function Providers({ children }: { children: React.ReactNode }) {
           <RainbowKitProvider theme={rkTheme}>
             <ToastProvider>
               <DepositWatcher />
+              <ServiceWorkerRegister />
               {children}
             </ToastProvider>
           </RainbowKitProvider>

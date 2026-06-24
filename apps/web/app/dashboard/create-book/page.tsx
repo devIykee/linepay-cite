@@ -57,8 +57,20 @@ export default function CreateBookPage() {
   const [restorable, setRestorable] = useState<BookDraftSnapshot | null>(null);
   const [ready, setReady] = useState(false);
 
-  const pageCounts = useMemo(() => chapters.map((ch) => splitPages(ch.body).length), [chapters]);
+  // Words per page (split on `---`) for the live writing counter, plus the
+  // page count and chapter word totals derived from it.
+  const pageWords = useMemo(
+    () => chapters.map((ch) => splitPages(ch.body).map((p) => (p.trim().match(/\S+/g) ?? []).length)),
+    [chapters]
+  );
+  const pageCounts = pageWords.map((w) => w.length);
   const totalPages = pageCounts.reduce((a, b) => a + b, 0);
+  // Global page offset for each chapter (page 1 of the whole book is the free
+  // preview), so per-page labels show the book-wide page number.
+  const chapterPageOffset = pageCounts.reduce<number[]>((acc, n, i) => {
+    acc.push(i === 0 ? 0 : acc[i - 1] + pageCounts[i - 1]);
+    return acc;
+  }, []);
 
   function clearAutosave() {
     try { localStorage.removeItem(AUTOSAVE_KEY); } catch { /* ignore */ }
@@ -279,7 +291,8 @@ export default function CreateBookPage() {
                 className="flex-1 rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-1.5 font-body-md focus:border-primary focus:outline-none"
               />
               <span className="shrink-0 font-data-mono text-[11px] text-outline">
-                {pageCounts[i]} page{pageCounts[i] === 1 ? "" : "s"}
+                {pageCounts[i]} page{pageCounts[i] === 1 ? "" : "s"} ·{" "}
+                {pageWords[i].reduce((a, b) => a + b, 0)} words
               </span>
               {chapters.length > 1 && (
                 <button
@@ -298,6 +311,27 @@ export default function CreateBookPage() {
               placeholder={"Paste the chapter text here (Markdown supported).\n\nSplit it into pages with a line containing only ---"}
               className="w-full rounded-lg border border-outline-variant bg-surface-container-lowest px-3 py-2 font-reading text-[15px] leading-relaxed focus:border-primary focus:outline-none"
             />
+            {/* Live per-page word counter — pages split on `---`; book page 1 is
+                the free preview. ~150-250 words/page reads well in the viewer. */}
+            {pageWords[i].length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {pageWords[i].map((w, p) => {
+                  const globalPage = chapterPageOffset[i] + p; // 0 = free preview
+                  const long = w > 280;
+                  return (
+                    <span
+                      key={p}
+                      title={long ? "This page is long — readers may have to scroll. ~150-250 words/page reads best." : undefined}
+                      className={`rounded-full border px-2 py-0.5 font-data-mono text-[10px] ${
+                        long ? "border-primary/40 bg-primary/5 text-primary" : "border-outline-variant text-outline"
+                      }`}
+                    >
+                      p{globalPage + 1} · {w}w{globalPage === 0 ? " · free" : ""}
+                    </span>
+                  );
+                })}
+              </div>
+            )}
           </div>
         ))}
 
