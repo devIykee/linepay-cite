@@ -1502,3 +1502,171 @@ export function countPaidReaders(contentId: string, blockIndex?: number | null):
     params
   ).then((r) => Number(r?.n ?? 0));
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Ghost integration (migration 0012) — credentials stored ENCRYPTED at rest.
+// This layer never decrypts; callers (the webhook receiver) decrypt via
+// lib/secrets.ts. The Admin API key column never leaves the server in plaintext.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type GhostConnectionStatus = "unconnected" | "connected" | "error";
+
+export interface GhostIntegrationRow {
+  creator_id: string;
+  site_url: string;
+  content_api_key_enc: string;
+  admin_api_key_enc: string;
+  default_monetization: "free" | "paid";
+  auto_publish: boolean;
+  connection_status: GhostConnectionStatus;
+  last_error: string | null;
+  last_event_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export function getGhostIntegration(creatorId: string): Promise<GhostIntegrationRow | undefined> {
+  return queryOne<GhostIntegrationRow>(`SELECT * FROM ghost_integrations WHERE creator_id = $1`, [creatorId]);
+}
+
+export interface UpsertGhostIntegrationInput {
+  creatorId: string;
+  siteUrl: string;
+  contentApiKeyEnc: string;
+  adminApiKeyEnc: string;
+  defaultMonetization: "free" | "paid";
+  autoPublish: boolean;
+}
+
+/** Create or update a creator's Ghost connection. Resets status to 'unconnected'
+ *  (a fresh connection is confirmed only by the first successful webhook). */
+export function upsertGhostIntegration(input: UpsertGhostIntegrationInput): Promise<GhostIntegrationRow | undefined> {
+  return queryOne<GhostIntegrationRow>(
+    `INSERT INTO ghost_integrations
+       (creator_id, site_url, content_api_key_enc, admin_api_key_enc, default_monetization, auto_publish, connection_status, last_error)
+     VALUES ($1,$2,$3,$4,$5,$6,'unconnected',NULL)
+     ON CONFLICT (creator_id) DO UPDATE SET
+       site_url = EXCLUDED.site_url,
+       content_api_key_enc = EXCLUDED.content_api_key_enc,
+       admin_api_key_enc = EXCLUDED.admin_api_key_enc,
+       default_monetization = EXCLUDED.default_monetization,
+       auto_publish = EXCLUDED.auto_publish,
+       connection_status = 'unconnected',
+       last_error = NULL,
+       updated_at = NOW()
+     RETURNING *`,
+    [input.creatorId, input.siteUrl, input.contentApiKeyEnc, input.adminApiKeyEnc, input.defaultMonetization, input.autoPublish]
+  );
+}
+
+/** Update only the saved options (toggles) without touching credentials. */
+export function updateGhostOptions(
+  creatorId: string,
+  opts: { defaultMonetization?: "free" | "paid"; autoPublish?: boolean }
+): Promise<GhostIntegrationRow | undefined> {
+  return queryOne<GhostIntegrationRow>(
+    `UPDATE ghost_integrations
+        SET default_monetization = COALESCE($2, default_monetization),
+            auto_publish = COALESCE($3, auto_publish),
+            updated_at = NOW()
+      WHERE creator_id = $1 RETURNING *`,
+    [creatorId, opts.defaultMonetization ?? null, opts.autoPublish ?? null]
+  );
+}
+
+export function setGhostConnectionStatus(
+  creatorId: string,
+  status: GhostConnectionStatus,
+  lastError: string | null = null
+): Promise<GhostIntegrationRow | undefined> {
+  return queryOne<GhostIntegrationRow>(
+    `UPDATE ghost_integrations
+        SET connection_status = $2,
+            last_error = $3,
+            last_event_at = CASE WHEN $2 = 'connected' THEN NOW() ELSE last_event_at END,
+            updated_at = NOW()
+      WHERE creator_id = $1 RETURNING *`,
+    [creatorId, status, lastError]
+  );
+}
+
+export function deleteGhostIntegration(creatorId: string): Promise<unknown> {
+  return query(`DELETE FROM ghost_integrations WHERE creator_id = $1`, [creatorId]);
+}
+
+// ── Ghost post idempotency map ───────────────────────────────────────────────
+
+export interface GhostPostMapRow {
+  ghost_post_id: string;
+  creator_id: string;
+  content_id: string;
+  created_at: Date;
+}
+
+export function getGhostPostMap(ghostPostId: string): Promise<GhostPostMapRow | undefined> {
+  return queryOne<GhostPostMapRow>(`SELECT * FROM ghost_post_map WHERE ghost_post_id = $1`, [ghostPostId]);
+}
+
+/** Record that a Ghost post became a Skimflow content. Idempotent: a duplicate
+ *  ghost_post_id is ignored (ON CONFLICT DO NOTHING) and returns undefined. */
+export function insertGhostPostMap(
+  ghostPostId: string,
+  creatorId: string,
+  contentId: string
+): Promise<GhostPostMapRow | undefined> {
+  return queryOne<GhostPostMapRow>(
+    `INSERT INTO ghost_post_map (ghost_post_id, creator_id, content_id)
+     VALUES ($1,$2,$3) ON CONFLICT (ghost_post_id) DO NOTHING RETURNING *`,
+    [ghostPostId, creatorId, contentId]
+  );
+}
+
+// ── In-app notifications (migration 0012) ────────────────────────────────────
+
+export interface NotificationRow {
+  id: string;
+  user_id: string;
+  type: string;
+  title: string;
+  body: string;
+  link: string | null;
+  read: boolean;
+  metadata: Record<string, unknown> | null;
+  created_at: Date;
+}
+
+export function createNotification(input: {
+  userId: string;
+  type: string;
+  title: string;
+  body?: string;
+  link?: string | null;
+  metadata?: Record<string, unknown> | null;
+}): Promise<NotificationRow | undefined> {
+  return queryOne<NotificationRow>(
+    `INSERT INTO notifications (user_id, type, title, body, link, metadata)
+     VALUES ($1,$2,$3,$4,$5,$6) RETURNING *`,
+    [input.userId, input.type, input.title, input.body ?? "", input.link ?? null, input.metadata ?? null]
+  );
+}
+
+export function listNotifications(userId: string, limit = 20): Promise<NotificationRow[]> {
+  return query<NotificationRow>(
+    `SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT $2`,
+    [userId, limit]
+  );
+}
+
+export function unreadNotificationCount(userId: string): Promise<number> {
+  return queryOne<{ n: string }>(
+    `SELECT COUNT(*)::int AS n FROM notifications WHERE user_id = $1 AND read = FALSE`,
+    [userId]
+  ).then((r) => Number(r?.n ?? 0));
+}
+
+export function markNotificationsRead(userId: string, ids?: string[]): Promise<unknown> {
+  if (ids && ids.length > 0) {
+    return query(`UPDATE notifications SET read = TRUE WHERE user_id = $1 AND id = ANY($2::uuid[])`, [userId, ids]);
+  }
+  return query(`UPDATE notifications SET read = TRUE WHERE user_id = $1 AND read = FALSE`, [userId]);
+}

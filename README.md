@@ -95,7 +95,7 @@ The flow is the canonical x402 loop: **GET → 402 quote → sign EIP-3009 / bui
 
 ## Routes
 
-`/` · `/for-you` (feed) · `/read/[slug]` (reader — articles, agent-skills, Skimflow, books) · `/dashboard` (publish / earnings / wallet) · `/dashboard/create-book` (chapter builder) · `/dashboard/settings` · `/docs` · `/marketplace` · `/login` · `/terms` · `/admin/*` (moderation, payments, users, wallets, agents)
+`/` · `/for-you` (feed) · `/read/[slug]` (reader — articles, agent-skills, Skimflow, books) · `/creator/[creatorId]` (public profile + RSS) · `/dashboard` (publish / earnings / wallet) · `/dashboard/create-book` (chapter builder) · `/dashboard/settings` (profile + integrations) · `/docs` · `/docs/integrations` · `/marketplace` · `/login` · `/terms` · `/admin/*` (moderation, payments, users, wallets, agents)
 
 ## API reference (selected)
 
@@ -111,6 +111,25 @@ The flow is the canonical x402 loop: **GET → 402 quote → sign EIP-3009 / bui
 | `POST` | `/api/import-url` | import a Medium article or GitHub `.md` skill |
 | `GET` | `/api/marketplace` · `/api/marketplace/search` | feed listing + search |
 | `POST` | `/api/webhooks/circle` | Circle settlement webhook (finalizes pending live payments) |
+| `GET` | `/api/articles/:postId/full-content` | **x402 citation toll** — agents buy a whole article in one payment (402 → pay → 200 with all blocks as HTML + plaintext) |
+| `GET` | `/api/creators/:idOrHandle/feed.xml` · `/posts` | per-creator RSS 2.0 feed · public posts JSON (`?limit=N`); paid posts are teaser-only |
+| `GET/PUT/DELETE` | `/api/creator/integrations/ghost` | Ghost connection (credentials encrypted at rest; never returned to the client) |
+| `POST` | `/api/webhooks/ghost?creator=:id` | Ghost "Post published" webhook — HMAC-verified, idempotent; detects type, splits, drafts/auto-publishes |
+| `GET/POST` | `/api/notifications` | in-app notifications (list + mark read) |
+
+---
+
+## Integrations
+
+Skimflow plugs into the tools creators already use — see **`/docs/integrations`** for the full guide.
+
+| Integration | What it does |
+|---|---|
+| **Ghost CMS** | Connect a Ghost blog once in **Settings → Integrations**. Publishing in Ghost fires a signed webhook; Skimflow fetches the full post via the Content API, auto-detects its type (article / book / picture / agent-skills), splits it into payable blocks, and either saves a **draft** or **auto-publishes** per your default monetization. Credentials are AES-256-GCM encrypted at rest (`INTEGRATION_ENC_KEY`); the Admin API key signs/verifies webhooks and never leaves the server. |
+| **x402 citation toll** | Every published article exposes `GET /api/articles/:postId/full-content` for AI agents / HTTP clients — one x402 USDC payment (to the **creator's** wallet, never a platform address) returns the full article, all blocks, as HTML + clean plaintext. Free articles skip payment. Separate from the human unlock flow. |
+| **RSS · Folo · RSSHub Radar** | Per-creator RSS 2.0 feeds with server-rendered `<link>` discovery on profile **and** post pages, so AI-native readers (Folo) and RSSHub Radar auto-subscribe. A native RSSHub route (`/skimflow/creator/:creatorId`) ships at the repo root. Paid posts appear as a free teaser only. |
+
+> **Env:** Ghost integration requires `INTEGRATION_ENC_KEY` (32-byte hex/base64; `openssl rand -hex 32`) for encrypting stored credentials.
 
 ## Going live on Arc
 

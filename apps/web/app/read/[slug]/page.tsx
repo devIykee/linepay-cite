@@ -27,10 +27,17 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const description = clip(content.summary) || `Read “${content.title}” on Skimflow — pay-per-block in USDC.`;
   const image = content.cover_image_url || `${SITE}/logo.svg`;
   const isBook = content.content_type === "book";
+  // Server-rendered RSS discovery: point every post page at its creator's feed so
+  // Folo / RSSHub Radar can auto-subscribe straight from a single post (read raw HTML).
+  const feedUrl = `${SITE}/api/creators/${content.creator_id}/feed.xml`;
+  const feedTitle = `${content.title} — ${author} on Skimflow`;
   return {
     title: content.title,
     description,
-    alternates: { canonical: url },
+    alternates: {
+      canonical: url,
+      types: { "application/rss+xml": [{ url: feedUrl, title: feedTitle }] },
+    },
     authors: content.creator_handle ? [{ name: author }] : undefined,
     keywords: content.tags ? content.tags.split(",").map((t) => t.trim()).filter(Boolean) : undefined,
     openGraph: {
