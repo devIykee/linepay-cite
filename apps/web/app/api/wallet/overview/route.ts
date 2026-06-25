@@ -1,5 +1,5 @@
 import { requireUser, errorResponse } from "@/lib/session";
-import { issueUserToken, listWalletTransactions } from "@/lib/circle-wallets";
+import { listWalletTxs } from "@/lib/circle-wallets";
 import { readBalances } from "@/lib/gateway-relayer";
 import { listLedger } from "@/lib/store";
 import type { Address } from "viem";
@@ -53,8 +53,7 @@ export async function GET() {
     }> = [];
     if (user.embedded_wallet_id) {
       try {
-        const { userToken } = await issueUserToken(user.id);
-        const txs = await listWalletTransactions(userToken, user.embedded_wallet_id);
+        const txs = await listWalletTxs(user.embedded_wallet_id);
         outgoing = txs
           .filter((t) => (t.operation ?? "").toUpperCase().includes("TRANSFER") && t.destinationAddress)
           .map((t) => ({

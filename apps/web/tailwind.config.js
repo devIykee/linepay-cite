@@ -46,17 +46,19 @@ export default {
         "max-width": "1200px",
       },
       fontFamily: {
+        // Single type family across the whole app — Hanken Grotesk for headings,
+        // body, labels, and long-form reading. `data-mono` uses the platform
+        // monospace stack (no extra web font) so numbers/hashes stay legible.
         "body-lg": ["Hanken Grotesk", "system-ui", "sans-serif"],
         "label-caps": ["Hanken Grotesk", "system-ui", "sans-serif"],
-        "headline-md": ["Playfair Display", "Georgia", "serif"],
+        "headline-md": ["Hanken Grotesk", "system-ui", "sans-serif"],
         "body-sm": ["Hanken Grotesk", "system-ui", "sans-serif"],
-        "data-mono": ["JetBrains Mono", "ui-monospace", "monospace"],
-        "display-lg": ["Playfair Display", "Georgia", "serif"],
+        "data-mono": ["ui-monospace", "SFMono-Regular", "Menlo", "Consolas", "monospace"],
+        "display-lg": ["Hanken Grotesk", "system-ui", "sans-serif"],
         "body-md": ["Hanken Grotesk", "system-ui", "sans-serif"],
-        "headline-sm": ["Playfair Display", "Georgia", "serif"],
-        "display-lg-mobile": ["Playfair Display", "Georgia", "serif"],
-        // Reading serif for long-form article bodies (premium publishing feel).
-        "reading": ["Source Serif 4", "Georgia", "Cambria", "serif"],
+        "headline-sm": ["Hanken Grotesk", "system-ui", "sans-serif"],
+        "display-lg-mobile": ["Hanken Grotesk", "system-ui", "sans-serif"],
+        "reading": ["Hanken Grotesk", "system-ui", "sans-serif"],
       },
       fontSize: {
         "body-lg": ["18px", { lineHeight: "1.6", fontWeight: "400" }],

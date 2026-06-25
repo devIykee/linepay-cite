@@ -6,8 +6,10 @@ import UserMenu from "@/components/UserMenu";
 import { Analytics } from '@vercel/analytics/next';
 import { SpeedInsights } from '@vercel/speed-insights/next';
 import MobileNav from "@/components/MobileNav";
+import Footer from "@/components/Footer";
 import ThemeToggle from "@/components/ThemeToggle";
 import Logo from "@/components/Logo";
+import { auth } from "@/auth";
 
 const SITE_NAME = "Skimflow";
 const SITE_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://skimflow.vercel.app").replace(/\/$/, "");
@@ -53,7 +55,12 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  // Auth-aware shell: signed-in users get the bottom nav (the authenticated app
+  // shell); signed-out visitors get the marketing footer. They never co-render,
+  // which also removes the bottom nav from the landing page and /login.
+  const session = await auth();
+  const authed = !!session?.user;
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -67,7 +74,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
         <link rel="preconnect" href="https://fonts.googleapis.com" />
         <link rel="preconnect" href="https://fonts.gstatic.com" crossOrigin="anonymous" />
         <link
-          href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&family=Playfair+Display:wght@600;700&family=Source+Serif+4:opsz,wght@8..60,400;8..60,600&family=JetBrains+Mono:wght@500&display=swap"
+          href="https://fonts.googleapis.com/css2?family=Hanken+Grotesk:wght@400;500;600;700&display=swap"
           rel="stylesheet"
         />
         <link
@@ -102,30 +109,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             </nav>
           </header>
 
-          {/* pb on mobile keeps content clear of the fixed bottom nav. */}
-          <main className="flex-grow pb-16 md:pb-0">{children}</main>
+          {/* pb on mobile keeps content clear of the fixed bottom nav (signed-in only). */}
+          <main className={`flex-grow ${authed ? "pb-16 md:pb-0" : ""}`}>{children}</main>
 
-          <footer className="border-t border-outline-variant bg-surface-container-low">
-            <div className="mx-auto flex max-w-max-width flex-col items-center justify-between gap-stack-md px-margin-mobile py-stack-lg md:flex-row md:px-margin-desktop">
-              <div className="flex items-center gap-2">
-                <Logo className="h-8 w-8 shrink-0" />
-                <span className="label-caps text-on-surface">SKIMFLOW</span>
-              </div>
-              <div className="font-body-sm text-body-sm text-on-surface-variant">
-                x402 · Circle Gateway · USDC on Arc
-              </div>
-              <div className="flex gap-gutter">
-                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/docs">Docs</Link>
-                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/for-you">For You</Link>
-                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/dashboard">Dashboard</Link>
-                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/partners">Partners</Link>
-                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/whitepaper">White paper</Link>
-                <Link className="font-body-sm text-body-sm text-on-surface-variant hover:text-primary" href="/terms">Terms</Link>
-              </div>
-            </div>
-          </footer>
-
-          <MobileNav />
+          {authed ? <MobileNav /> : <Footer />}
         </Providers>
         <Analytics />
         <SpeedInsights />

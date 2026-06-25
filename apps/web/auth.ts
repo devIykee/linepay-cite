@@ -1,6 +1,7 @@
 import NextAuth from "next-auth";
 import { authConfig } from "./auth.config.js";
-import { getUserById, recordAdminEvent, upsertUserFromOAuth } from "./lib/store.js";
+import { getUserById, recordAdminEvent, setEmbeddedWallet, upsertUserFromOAuth } from "./lib/store.js";
+import { provisionWallet, walletsEnabled } from "./lib/circle-wallets.js";
 
 /**
  * Full NextAuth instance (Node runtime). Adds the DB-backed jwt callback that
@@ -37,6 +38,19 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             actorId: dbUser.id,
             metadata: { email: dbUser.email, provider: dbUser.provider, name: dbUser.display_name },
           });
+          // Auto-provision a developer-controlled wallet at signup (non-admins
+          // only — admins sign with an external wallet). Best-effort: a Circle
+          // outage must never block sign-in; the wallet is backfilled later via
+          // `npm run db:backfill-wallets` or a visit to /api/wallet/embedded.
+          if (dbUser.role !== "admin" && !dbUser.embedded_wallet_id && walletsEnabled()) {
+            try {
+              const w = await provisionWallet();
+              await setEmbeddedWallet(dbUser.id, w.id, w.address);
+              token.walletLinked = true;
+            } catch (e) {
+              console.error("[auth] wallet auto-provision failed:", (e as Error)?.message ?? e);
+            }
+          }
         }
       } else if (trigger === "update" && token.uid) {
         // Client called session.update() (e.g. after linking a wallet) — refresh.

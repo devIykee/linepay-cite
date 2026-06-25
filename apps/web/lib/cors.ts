@@ -38,11 +38,10 @@ export function corsPolicyFor(pathname: string): CorsPolicy | null {
     return { origin: APP_URL, methods: "GET, POST, DELETE, OPTIONS", headers: "Content-Type", credentials: true };
   }
 
-  // Auth / creator / import / dashboard — locked to the app origin, credentials.
+  // Auth / creator / dashboard — locked to the app origin, credentials.
   if (
     pathname.startsWith("/api/auth") ||
     pathname.startsWith("/api/creator") ||
-    pathname.startsWith("/api/import-url") ||
     pathname.startsWith("/dashboard")
   ) {
     return {

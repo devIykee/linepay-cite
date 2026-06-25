@@ -1,40 +1,44 @@
 /**
- * Circle User-Controlled Wallets — server side.
+ * Circle Developer-Controlled Wallets — server side.
  *
- * Non-custodial embedded wallets: Circle generates an MPC-secured wallet the
- * USER custodies via a PIN they set on the device (no app download). We use our
- * own `users.id` as the Circle `userId`, so every account maps 1:1 to a Circle
- * user. The backend never holds the key; it can only read addresses and create
- * *challenges* that the frontend Web SDK executes with the user's PIN.
+ * Custodial wallets the PLATFORM controls via an encrypted entity secret. We
+ * auto-provision one SCA wallet on Arc for every (non-admin) user at signup, so
+ * there is no PIN, no challenge, and no client SDK — every signing operation
+ * (deposit/delegate for silent-pay, withdrawals) happens server-side here.
  *
- * Only CIRCLE_API_KEY is needed here (no entity secret — that's for
- * developer-controlled wallets). The public App ID lives on the client.
+ * Requires CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET (32-byte hex, registered with
+ * Circle) and a CIRCLE_WALLET_SET_ID that owns all user wallets (create once via
+ * scripts/circle-create-walletset.mjs).
  *
- * Admins are NEVER provisioned an embedded wallet — they sign with an external
- * wallet. Enforcement lives in the route handlers, not here.
+ * Admins are NEVER provisioned a wallet — they sign with an external wallet.
+ * Enforcement lives in the route handlers / signup, not here.
  */
-import {
-  initiateUserControlledWalletsClient,
-  type CircleUserControlledWalletsClient,
-} from "@circle-fin/user-controlled-wallets";
+import { initiateDeveloperControlledWalletsClient } from "@circle-fin/developer-controlled-wallets";
 
 /** Arc testnet identifier in Circle's blockchain enum. */
 export const CIRCLE_ARC = "ARC-TESTNET";
 
-let client: CircleUserControlledWalletsClient | null = null;
+/** USDC token address on Arc (6 decimals), used to pick the right balance/token. */
+const USDC_ADDRESS = (
+  process.env.NEXT_PUBLIC_USDC_ADDRESS ||
+  process.env.USDC_ADDRESS ||
+  ""
+).toLowerCase();
+
+type DevWalletsClient = ReturnType<typeof initiateDeveloperControlledWalletsClient>;
+
+let client: DevWalletsClient | null = null;
 let warnedKeyShape = false;
 
 /**
  * Circle keys generated after May 2023 have THREE colon-separated parts:
- * `<ENV>:<id>:<secret>` (e.g. `TEST_API_KEY:abc…:def…`). A key stored without
- * the environment prefix (just `<id>:<secret>`) makes the SDK throw a 401
- * "malformed API key" — which surfaced as a bare 500 on /api/wallet/embedded.
- * Normalize it here so a missing prefix doesn't take down provisioning.
+ * `<ENV>:<id>:<secret>`. A key stored without the environment prefix makes the
+ * SDK throw a 401 "malformed API key". Normalize it so a missing prefix doesn't
+ * take down provisioning.
  */
 function normalizeApiKey(raw: string): string {
   const key = raw.trim();
   if (/^(TEST|LIVE)_API_KEY:/.test(key)) return key;
-  // Two-part `id:secret` → assume testnet and prepend the prefix.
   if (key.split(":").length === 2) {
     if (!warnedKeyShape) {
       console.warn(
@@ -48,116 +52,69 @@ function normalizeApiKey(raw: string): string {
   return key;
 }
 
-/** Lazily build the Circle client. Throws a clear error if the key is missing. */
-export function circle(): CircleUserControlledWalletsClient {
+/** Lazily build the developer-controlled client. Throws if credentials are missing. */
+export function circle(): DevWalletsClient {
   if (client) return client;
   const apiKey = process.env.CIRCLE_API_KEY;
-  if (!apiKey) throw new Error("CIRCLE_API_KEY is not set — required for embedded wallets.");
-  client = initiateUserControlledWalletsClient({ apiKey: normalizeApiKey(apiKey) });
+  const entitySecret = process.env.CIRCLE_ENTITY_SECRET;
+  if (!apiKey) throw new Error("CIRCLE_API_KEY is not set — required for wallets.");
+  if (!entitySecret)
+    throw new Error("CIRCLE_ENTITY_SECRET is not set — required for developer-controlled wallets.");
+  client = initiateDeveloperControlledWalletsClient({
+    apiKey: normalizeApiKey(apiKey),
+    entitySecret,
+  });
   return client;
 }
 
-/** True when embedded wallets are configured (key + public App ID present). */
-export function embeddedWalletsEnabled(): boolean {
-  return !!process.env.CIRCLE_API_KEY && !!process.env.NEXT_PUBLIC_CIRCLE_APP_ID;
+/** True when developer-controlled wallets are fully configured. */
+export function walletsEnabled(): boolean {
+  return (
+    !!process.env.CIRCLE_API_KEY &&
+    !!process.env.CIRCLE_ENTITY_SECRET &&
+    !!process.env.CIRCLE_WALLET_SET_ID
+  );
 }
 
-/**
- * Ensure a Circle user exists for our userId. `createUser` is effectively
- * idempotent for our purposes — a duplicate returns a 409 we can ignore.
- */
-export async function ensureCircleUser(userId: string): Promise<void> {
-  try {
-    await circle().createUser({ userId });
-  } catch (e) {
-    const msg = String((e as { message?: string })?.message ?? e);
-    // Already exists → fine. Re-throw anything else.
-    if (!/already exist|409|duplicate/i.test(msg)) throw e;
-  }
-}
-
-/** A short-lived (60-min) session token + encryption key for the Web SDK. */
-export async function issueUserToken(
-  userId: string
-): Promise<{ userToken: string; encryptionKey: string }> {
-  const res = await circle().createUserToken({ userId });
-  const userToken = res.data?.userToken;
-  const encryptionKey = res.data?.encryptionKey;
-  if (!userToken || !encryptionKey) throw new Error("circle_token_failed");
-  return { userToken, encryptionKey };
-}
-
-/**
- * Create the initialize-PIN + create-wallet challenge. The frontend Web SDK
- * executes the returned challengeId; the user sets a PIN and the SCA wallet is
- * created on Arc.
- */
-export async function createWalletChallenge(userToken: string): Promise<string> {
-  const res = await circle().createUserPinWithWallets({
-    userToken,
-    blockchains: [CIRCLE_ARC as never],
-    accountType: "SCA",
-  });
-  const challengeId = res.data?.challengeId;
-  if (!challengeId) throw new Error("circle_wallet_challenge_failed");
-  return challengeId;
-}
-
-export interface EmbeddedWallet {
+export interface ProvisionedWallet {
   id: string;
   address: string;
 }
 
-/** Read the user's first Arc wallet (id + address) — available server-side. */
-export async function getEmbeddedWallet(userToken: string): Promise<EmbeddedWallet | null> {
-  const res = await circle().listWallets({ userToken });
-  const wallet = res.data?.wallets?.find((w) => !!w.address) ?? res.data?.wallets?.[0];
-  if (!wallet?.id || !wallet?.address) return null;
+/**
+ * Provision ONE SCA wallet on Arc inside our wallet set. Custodial — the user
+ * never sees a key or a PIN. Returns the Circle wallet id + on-chain address to
+ * persist against the user.
+ */
+export async function provisionWallet(): Promise<ProvisionedWallet> {
+  const walletSetId = process.env.CIRCLE_WALLET_SET_ID;
+  if (!walletSetId)
+    throw new Error("CIRCLE_WALLET_SET_ID is not set — run scripts/circle-create-walletset.mjs.");
+  const res = await circle().createWallets({
+    accountType: "SCA",
+    blockchains: [CIRCLE_ARC as never],
+    count: 1,
+    walletSetId,
+  });
+  const wallet = res.data?.wallets?.[0];
+  if (!wallet?.id || !wallet?.address) throw new Error("circle_wallet_create_failed");
   return { id: wallet.id, address: wallet.address };
 }
 
 /**
- * Confirm a destination address is valid for USDC on Arc before we let a user
- * withdraw to it. Returns false on any rejection or API error (fail closed).
+ * Read the wallet's spendable USDC balance (decimal string). Uses the balance
+ * endpoint — NEVER getWallet, which never returns balances. Returns "0" if the
+ * token isn't held yet.
  */
-export async function validateAddress(address: string): Promise<boolean> {
-  try {
-    const res = await circle().validateAddress({
-      address,
-      blockchain: CIRCLE_ARC as never,
-    });
-    return res.data?.isValid === true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Create a USDC transfer (withdrawal) challenge from the user's embedded wallet
- * to an external address. The frontend executes the returned challengeId with
- * the user's PIN; Circle broadcasts the transfer. Returns the challengeId and
- * the transaction id (for status polling). `amountUsdc` is a decimal string.
- */
-export async function createTransferChallenge(input: {
-  userToken: string;
-  walletId: string;
-  destinationAddress: string;
-  amountUsdc: string;
-  idempotencyKey: string;
-}): Promise<{ challengeId: string }> {
-  const res = await circle().createTransaction({
-    userToken: input.userToken,
-    idempotencyKey: input.idempotencyKey,
-    walletId: input.walletId,
-    destinationAddress: input.destinationAddress,
-    tokenAddress: process.env.NEXT_PUBLIC_USDC_ADDRESS || "",
-    blockchain: CIRCLE_ARC as never,
-    amounts: [input.amountUsdc],
-    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
-  } as never);
-  const challengeId = res.data?.challengeId;
-  if (!challengeId) throw new Error("circle_transfer_challenge_failed");
-  return { challengeId };
+export async function getUsdcBalance(walletId: string): Promise<string> {
+  const res = await circle().getWalletTokenBalance({ id: walletId });
+  const balances = res.data?.tokenBalances ?? [];
+  const usdc = balances.find((b) => {
+    const sym = b.token?.symbol?.toUpperCase();
+    const addr = b.token?.tokenAddress?.toLowerCase();
+    return sym === "USDC" || (!!USDC_ADDRESS && addr === USDC_ADDRESS);
+  });
+  return usdc?.amount ?? "0";
 }
 
 export interface WalletTx {
@@ -171,7 +128,6 @@ export interface WalletTx {
   operation?: string;
 }
 
-/** Map a Circle Transaction (loosely typed) into our small WalletTx shape. */
 function toWalletTx(t: Record<string, unknown>, fallbackId = ""): WalletTx {
   return {
     id: String(t.id ?? fallbackId),
@@ -185,21 +141,59 @@ function toWalletTx(t: Record<string, unknown>, fallbackId = ""): WalletTx {
   };
 }
 
-/** List the embedded wallet's on-chain transactions (for outgoing history). */
-export async function listWalletTransactions(userToken: string, walletId: string): Promise<WalletTx[]> {
-  try {
-    const res = await circle().listTransactions({ userToken, walletIds: [walletId] } as never);
-    const txs = (res.data?.transactions ?? []) as unknown as Array<Record<string, unknown>>;
-    return txs.map((t) => toWalletTx(t));
-  } catch {
-    return [];
-  }
+/**
+ * Create a USDC transfer (withdrawal) from a user's wallet to an external
+ * address. Signed server-side with the entity secret; settles asynchronously.
+ * Returns the Circle transaction id for status polling. `amountUsdc` is decimal.
+ */
+export async function transferUsdc(input: {
+  walletId: string;
+  destinationAddress: string;
+  amountUsdc: string;
+  idempotencyKey: string;
+}): Promise<{ id: string }> {
+  const res = await circle().createTransaction({
+    walletId: input.walletId,
+    tokenAddress: USDC_ADDRESS,
+    destinationAddress: input.destinationAddress,
+    amounts: [input.amountUsdc],
+    idempotencyKey: input.idempotencyKey,
+    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+  } as never);
+  const id = res.data?.id;
+  if (!id) throw new Error("circle_transfer_failed");
+  return { id };
 }
 
-/** Read one transaction's current state (for withdrawal status polling). */
-export async function getWalletTransaction(userToken: string, txId: string): Promise<WalletTx | null> {
+/**
+ * Execute a contract call (approve / deposit / addDelegate for silent-pay setup)
+ * from a user's wallet. Signed server-side; no challenge. Returns the Circle
+ * transaction id. ABI values come from the caller (Gateway/USDC constants).
+ */
+export async function execContract(input: {
+  walletId: string;
+  contractAddress: string;
+  abiFunctionSignature: string;
+  abiParameters: Array<string | number>;
+  idempotencyKey: string;
+}): Promise<{ id: string }> {
+  const res = await circle().createContractExecutionTransaction({
+    walletId: input.walletId,
+    contractAddress: input.contractAddress,
+    abiFunctionSignature: input.abiFunctionSignature,
+    abiParameters: input.abiParameters,
+    idempotencyKey: input.idempotencyKey,
+    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
+  } as never);
+  const id = res.data?.id;
+  if (!id) throw new Error("circle_contract_exec_failed");
+  return { id };
+}
+
+/** Read one transaction's current state (for withdrawal/setup status polling). */
+export async function getTx(txId: string): Promise<WalletTx | null> {
   try {
-    const res = await circle().getTransaction({ userToken, id: txId } as never);
+    const res = await circle().getTransaction({ id: txId });
     const t = res.data?.transaction as unknown as Record<string, unknown> | undefined;
     if (!t) return null;
     return toWalletTx(t, txId);
@@ -208,27 +202,13 @@ export async function getWalletTransaction(userToken: string, txId: string): Pro
   }
 }
 
-/**
- * Create a contract-execution challenge (approve / deposit / addDelegate). The
- * frontend executes it with the PIN; the SCA broadcasts the tx. Returns the
- * challengeId. ABI values come from the caller (Gateway/USDC constants).
- */
-export async function createContractExecChallenge(input: {
-  userToken: string;
-  walletId: string;
-  contractAddress: string;
-  abiFunctionSignature: string;
-  abiParameters: Array<string | number>;
-}): Promise<string> {
-  const res = await circle().createUserTransactionContractExecutionChallenge({
-    userToken: input.userToken,
-    walletId: input.walletId,
-    contractAddress: input.contractAddress,
-    abiFunctionSignature: input.abiFunctionSignature,
-    abiParameters: input.abiParameters,
-    fee: { type: "level", config: { feeLevel: "MEDIUM" } },
-  });
-  const challengeId = res.data?.challengeId;
-  if (!challengeId) throw new Error("circle_contract_challenge_failed");
-  return challengeId;
+/** List a wallet's transactions (outgoing history). Best-effort. */
+export async function listWalletTxs(walletId: string): Promise<WalletTx[]> {
+  try {
+    const res = await circle().listTransactions({ walletIds: [walletId] } as never);
+    const txs = (res.data?.transactions ?? []) as unknown as Array<Record<string, unknown>>;
+    return txs.map((t) => toWalletTx(t));
+  } catch {
+    return [];
+  }
 }
