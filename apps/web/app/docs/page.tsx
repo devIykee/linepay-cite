@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Code, H2, DocsTabs } from "./_components/DocsUI";
 
 export const metadata = {
   title: "Docs",
@@ -7,26 +8,10 @@ export const metadata = {
   alternates: { canonical: "/docs" },
 };
 
-function Code({ children, lang }: { children: string; lang?: string }) {
-  return (
-    <pre className="my-stack-md overflow-x-auto rounded-xl border border-on-surface/15 bg-[#0b0c10] p-4 font-data-mono text-[12.5px] leading-relaxed text-[#e4e2dd]">
-      {lang && <div className="mb-2 select-none font-label-caps text-[10px] uppercase text-white/40">{lang}</div>}
-      <code className="whitespace-pre">{children}</code>
-    </pre>
-  );
-}
-
-function H2({ id, children }: { id: string; children: React.ReactNode }) {
-  return (
-    <h2 id={id} className="mt-stack-lg scroll-mt-24 border-b border-outline-variant pb-2 font-headline-md text-headline-md">
-      {children}
-    </h2>
-  );
-}
-
 export default function DocsPage() {
   return (
     <div className="mx-auto max-w-4xl px-margin-mobile py-stack-lg md:px-margin-desktop">
+      <DocsTabs active="overview" />
       <header className="mb-8">
         <span className="label-caps text-primary">DOCUMENTATION</span>
         <h1 className="mt-1 font-display-lg text-display-lg-mobile md:text-display-lg">Get paid for your writing, one block at a time</h1>
@@ -224,6 +209,12 @@ GET /.well-known/agent-skills.json       # what's for sale (catalog of skills)`}
         judge relevance → request a paid block and get a <span className="font-data-mono text-body-sm">402</span> quote →
         sign a USDC payment and retry with the <span className="font-data-mono text-body-sm">X-Payment</span> header
         (the same Circle Gateway rail humans use). The bundled buyer agent above does all of this for you.
+      </p>
+      <p className="mt-stack-md rounded-xl border border-outline-variant bg-surface-container-low p-4 font-body-md text-on-surface-variant">
+        <strong>Connecting tools?</strong> Sync posts from Ghost, expose a one-payment{" "}
+        <span className="font-data-mono text-body-sm">full-content</span> API for AI clients, and make your work
+        auto-discoverable in RSS readers like Folo. See the{" "}
+        <Link href="/docs/integrations" className="text-primary">Integrations</Link> tab.
       </p>
 
       <H2 id="splits">Your earnings</H2>

@@ -1,6 +1,7 @@
 import { redirect } from "next/navigation";
 import { resolveActingUser } from "@/lib/session";
 import ProfileSettings from "../_components/ProfileSettings";
+import GhostIntegration from "../_components/GhostIntegration";
 
 export const dynamic = "force-dynamic";
 
@@ -13,15 +14,18 @@ export default async function SettingsPage() {
   }
   const u = ctx.user;
   return (
-    <ProfileSettings
-      initial={{
-        displayName: u.display_name ?? "",
-        handle: u.handle ?? "",
-        bio: u.bio ?? "",
-        avatar: u.avatar,
-        email: u.email,
-      }}
-      impersonating={ctx.impersonating}
-    />
+    <>
+      <ProfileSettings
+        initial={{
+          displayName: u.display_name ?? "",
+          handle: u.handle ?? "",
+          bio: u.bio ?? "",
+          avatar: u.avatar,
+          email: u.email,
+        }}
+        impersonating={ctx.impersonating}
+      />
+      <GhostIntegration impersonating={ctx.impersonating} />
+    </>
   );
 }
