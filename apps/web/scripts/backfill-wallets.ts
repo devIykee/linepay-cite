@@ -1,16 +1,22 @@
 /**
- * Backfill: provision a developer-controlled wallet for every existing non-admin
- * user who doesn't have one yet (e.g. accounts created before the dev-controlled
- * migration). Idempotent — re-running only touches users still missing a wallet.
+ * Provision developer-controlled wallets for users.
  *
- *   npm run db:backfill-wallets        (from apps/web)
+ *   npm run db:backfill-wallets             — fill ONLY users with no wallet yet
+ *   npm run db:backfill-wallets -- --replace — also REPLACE existing wallets
+ *                                              (swaps legacy user-controlled
+ *                                              wallets for dev-controlled ones)
+ *
+ * `--replace` re-provisions every non-admin user and overwrites their embedded
+ * wallet id/address, re-pointing the payout to the new wallet when it was routing
+ * to the old embedded one. Safe on testnet (old wallet funds are disposable).
+ * Not idempotent in replace mode — running it twice creates fresh wallets again.
  *
  * Prerequisites: CIRCLE_API_KEY + CIRCLE_ENTITY_SECRET + CIRCLE_WALLET_SET_ID set.
  */
 import { readFileSync, existsSync } from "node:fs";
 import path from "node:path";
 import { query } from "../lib/db.js";
-import { setEmbeddedWallet } from "../lib/store.js";
+import { setEmbeddedWallet, replaceEmbeddedWallet } from "../lib/store.js";
 import { provisionWallet, walletsEnabled } from "../lib/circle-wallets.js";
 
 function loadEnvFile(file: string): void {
@@ -32,31 +38,41 @@ loadEnvFile(path.resolve(process.cwd(), ".env.local"));
 loadEnvFile(path.resolve(process.cwd(), ".env"));
 loadEnvFile(path.resolve(process.cwd(), "../../.env"));
 
+const REPLACE = process.argv.includes("--replace");
+
 async function main() {
   if (!walletsEnabled()) {
     console.error("✗ Circle wallets not configured (need CIRCLE_API_KEY, CIRCLE_ENTITY_SECRET, CIRCLE_WALLET_SET_ID).");
     process.exit(1);
   }
-  const users = await query<{ id: string; email: string }>(
-    `SELECT id, email FROM users WHERE role <> 'admin' AND embedded_wallet_id IS NULL`
-  );
+
+  // Replace mode: every non-admin user (overwrite legacy wallets too).
+  // Default mode: only users still missing a wallet.
+  const sql = REPLACE
+    ? `SELECT id, email FROM users WHERE role <> 'admin'`
+    : `SELECT id, email FROM users WHERE role <> 'admin' AND embedded_wallet_id IS NULL`;
+  const users = await query<{ id: string; email: string }>(sql);
+
   if (users.length === 0) {
-    console.log("✓ All non-admin users already have a wallet — nothing to backfill.");
+    console.log("✓ Nothing to do.");
     process.exit(0);
   }
-  console.log(`Provisioning wallets for ${users.length} user(s)…`);
+  console.log(
+    `${REPLACE ? "Replacing wallets for" : "Provisioning wallets for"} ${users.length} user(s)…`
+  );
   let ok = 0;
   for (const u of users) {
     try {
       const w = await provisionWallet();
-      await setEmbeddedWallet(u.id, w.id, w.address);
+      if (REPLACE) await replaceEmbeddedWallet(u.id, w.id, w.address);
+      else await setEmbeddedWallet(u.id, w.id, w.address);
       ok++;
       console.log(`  ✓ ${u.email} → ${w.address}`);
     } catch (e) {
       console.error(`  ✗ ${u.email}:`, (e as Error)?.message ?? e);
     }
   }
-  console.log(`Done. ${ok}/${users.length} provisioned.`);
+  console.log(`Done. ${ok}/${users.length} ${REPLACE ? "replaced" : "provisioned"}.`);
   process.exit(ok === users.length ? 0 : 1);
 }
 

@@ -25,13 +25,22 @@ export interface EmbeddedStatus {
 export function useEmbeddedWallet() {
   const [status, setStatus] = useState<EmbeddedStatus | null>(null);
   const [busy, setBusy] = useState(false);
+  // null = not yet resolved (loading); true/false once the status call answers.
+  // Lets callers distinguish "still loading" from "signed out" (401), so the
+  // reader can prompt sign-in instead of spinning forever.
+  const [signedIn, setSignedIn] = useState<boolean | null>(null);
 
   const refresh = useCallback(async () => {
     try {
       const res = await fetch("/api/wallet/embedded", { credentials: "include" });
-      if (res.ok) setStatus((await res.json()) as EmbeddedStatus);
+      if (res.ok) {
+        setStatus((await res.json()) as EmbeddedStatus);
+        setSignedIn(true);
+      } else if (res.status === 401) {
+        setSignedIn(false);
+      }
     } catch {
-      /* ignore */
+      /* network hiccup — leave state as-is */
     }
   }, []);
 
@@ -53,5 +62,5 @@ export function useEmbeddedWallet() {
     }
   }, [refresh]);
 
-  return { status, busy, provision, refresh };
+  return { status, busy, provision, refresh, signedIn };
 }
