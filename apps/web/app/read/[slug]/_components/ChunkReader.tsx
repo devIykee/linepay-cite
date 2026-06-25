@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useAccount, useChainId, useSignTypedData, useSwitchChain } from "wagmi";
 import { readContract, writeContract, waitForTransactionReceipt } from "@wagmi/core";
 import { erc20Abi } from "viem";
@@ -9,7 +10,7 @@ import type { Address } from "viem";
 import { useToast } from "@/components/Toaster";
 import { wagmiConfig } from "@/lib/wagmi";
 import { formatUsdc, wholePiecePrice } from "@/lib/money";
-import { buildSessionPayment, loadSessionAccount } from "@/lib/session-key-client";
+import { buildSessionPayment, loadSessionAccount, clearSessionKey } from "@/lib/session-key-client";
 import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
 import PaySetupModal, { type PaySessionInfo } from "@/components/PaySetupModal";
 import ReadingFuel, { PAY_SESSION_EVENT } from "@/components/ReadingFuel";
@@ -112,6 +113,7 @@ export default function ChunkReader(props: Props) {
   const { signTypedDataAsync } = useSignTypedData();
   const { switchChainAsync } = useSwitchChain();
   const toast = useToast();
+  const pathname = usePathname();
 
   // Embedded (Circle) wallet — the default for signed-in users who didn't bring
   // their own. The silent-pay path works the same with either wallet; only the
@@ -121,12 +123,12 @@ export default function ChunkReader(props: Props) {
   const effectiveWallet = (address ?? embeddedAddr ?? undefined) as Address | undefined;
   const walletKind: "external" | "embedded" | null = address ? "external" : embeddedAddr ? "embedded" : null;
   const hasWallet = !!effectiveWallet;
-  // Embedded status loads async (null until the GET resolves). Until then we
-  // don't know if the user has an embedded wallet — showing the external-only
-  // Connect button in that window would wrongly prompt an embedded user to
-  // connect MetaMask. Treat "unknown" as loading. An external (wagmi) address
-  // is known synchronously, so a connected user is never blocked on this.
-  const walletLoading = !address && embedded.status === null;
+  // Wallet status resolves async: signedIn is null until the GET answers.
+  // Treat "unknown" as loading; once it resolves to false the visitor is signed
+  // out and gets a sign-in prompt (the auto wallet needs an account).
+  const walletLoading = !address && embedded.signedIn === null;
+  const signedOut = !address && embedded.signedIn === false;
+  const loginHref = `/login?callbackUrl=${encodeURIComponent(pathname ?? "/")}`;
 
   // Hydrate unlocked chunks + the saved reading position from localStorage so a
   // refresh (or a later visit) keeps progress and the scroll spot.
@@ -316,6 +318,16 @@ export default function ChunkReader(props: Props) {
       // Session ended or cap reached → fall back to setup / wallet.
       if (res.status === 401 || d.error === "no_pay_session") {
         setSessionActive(false);
+        return { ok: false };
+      }
+      // Verify failed: the saved session/key doesn't match the wallet we're now
+      // paying from (e.g. the wallet changed). Drop the stale session + local key
+      // and re-run setup against the current wallet instead of dead-ending.
+      if (d.error === "session_verify_failed") {
+        console.warn("[silent-pay] verify failed:", d.detail);
+        setSessionActive(false);
+        if (effectiveWallet) clearSessionKey(effectiveWallet);
+        await fetch("/api/pay-session/revoke", { method: "POST", credentials: "include" }).catch(() => {});
         return { ok: false };
       }
       throw new Error(d.friendly ?? d.error ?? "Silent payment failed.");
@@ -750,6 +762,18 @@ export default function ChunkReader(props: Props) {
                       <span className="material-symbols-outlined animate-spin text-[16px]">progress_activity</span>
                       Checking your wallet…
                     </span>
+                  ) : signedOut ? (
+                    <div className="flex flex-col items-center gap-2 rounded-2xl border border-outline-variant bg-surface/70 px-5 py-4 backdrop-blur">
+                      <Link
+                        href={loginHref}
+                        className="rounded-full bg-primary px-8 py-3 font-label-caps text-label-caps text-on-primary transition-all hover:opacity-90 active:scale-[0.98]"
+                      >
+                        Sign in to read on
+                      </Link>
+                      <span className="font-body-sm text-[11px] text-outline">
+                        A free Skimflow wallet is created when you sign in.
+                      </span>
+                    </div>
                   ) : !hasWallet ? (
                     <div className="flex flex-col items-center gap-2 rounded-2xl border border-outline-variant bg-surface/70 px-5 py-4 backdrop-blur">
                       <button

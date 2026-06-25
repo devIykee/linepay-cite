@@ -214,6 +214,34 @@ export function setEmbeddedWallet(
 }
 
 /**
+ * Replace a user's embedded wallet with a freshly-provisioned one (used to swap
+ * legacy user-controlled wallets for developer-controlled wallets). Overwrites
+ * the embedded id+address unconditionally, and re-points the active payout to
+ * the new address ONLY when it was already routing to the embedded wallet (so a
+ * deliberately-linked external payout is preserved). The CASE reads the OLD row
+ * values, so `wallet_address = embedded_wallet_address` matches the prior embed.
+ */
+export function replaceEmbeddedWallet(
+  id: string,
+  walletId: string,
+  address: string
+): Promise<User | undefined> {
+  return queryOne<User>(
+    `UPDATE users
+       SET embedded_wallet_id = $2,
+           embedded_wallet_address = $3,
+           wallet_address = CASE
+             WHEN wallet_source = 'embedded' OR wallet_address IS NULL OR wallet_address = embedded_wallet_address
+               THEN $3 ELSE wallet_address END,
+           wallet_source = CASE
+             WHEN wallet_source = 'embedded' OR wallet_address IS NULL OR wallet_address = embedded_wallet_address
+               THEN 'embedded' ELSE wallet_source END
+     WHERE id = $1 RETURNING *`,
+    [id, walletId, address]
+  );
+}
+
+/**
  * Switch which wallet receives payouts. Points `wallet_address` at the embedded
  * or the stored external address. Returns undefined if the requested wallet
  * isn't set yet (caller surfaces a friendly error).

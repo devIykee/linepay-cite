@@ -2,11 +2,12 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { usePathname } from "next/navigation";
 import { useAccount } from "wagmi";
 import type { Address } from "viem";
 import { useToast } from "@/components/Toaster";
 import { formatUsdc, wholePiecePrice } from "@/lib/money";
-import { buildSessionPayment, loadSessionAccount } from "@/lib/session-key-client";
+import { buildSessionPayment, loadSessionAccount, clearSessionKey } from "@/lib/session-key-client";
 import { useEmbeddedWallet } from "@/lib/useEmbeddedWallet";
 import PaySetupModal, { type PaySessionInfo } from "@/components/PaySetupModal";
 import ReadingFuel, { PAY_SESSION_EVENT } from "@/components/ReadingFuel";
@@ -70,15 +71,18 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
 
   const { address } = useAccount();
   const toast = useToast();
+  const pathname = usePathname();
   const embedded = useEmbeddedWallet();
   const embeddedAddr = embedded.status?.hasWallet ? (embedded.status.address as Address | null) : null;
   const effectiveWallet = (address ?? embeddedAddr ?? undefined) as Address | undefined;
   const walletKind: "external" | "embedded" | null = address ? "external" : embeddedAddr ? "embedded" : null;
-  // Embedded-wallet status loads async (null until the GET resolves). During that
-  // window we must NOT treat the reader as wallet-less — doing so wrongly popped
-  // the "connect a wallet" gate on a page turn for users who already had an
-  // embedded wallet. Mirror ChunkReader: only gate once we're sure there's none.
-  const walletLoading = !address && embedded.status === null;
+  // Wallet status loads async: signedIn is null until the GET resolves. During
+  // that window we must NOT treat the reader as wallet-less. Once it resolves to
+  // false the visitor is signed out and gets a sign-in prompt (the auto wallet
+  // needs an account).
+  const walletLoading = !address && embedded.signedIn === null;
+  const signedOut = !address && embedded.signedIn === false;
+  const loginHref = `/login?callbackUrl=${encodeURIComponent(pathname ?? "/")}`;
   // The wallet we actually pay from: the connected/embedded wallet if known,
   // otherwise the main wallet from the active session. Either is enough to sign
   // silent burns, so a funded reader can always turn the page.
@@ -292,7 +296,13 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
         turnTo(blockIndex);
         return;
       }
-      if (res.status === 401 || d.error === "no_pay_session") {
+      if (res.status === 401 || d.error === "no_pay_session" || d.error === "session_verify_failed") {
+        if (d.error === "session_verify_failed") {
+          // Stale session/key vs the current wallet — drop them and re-set up.
+          console.warn("[silent-pay] verify failed:", d.detail);
+          if (payWallet) clearSessionKey(payWallet);
+          await fetch("/api/pay-session/revoke", { method: "POST", credentials: "include" }).catch(() => {});
+        }
         setSessionActive(false);
         setPendingBlock(blockIndex);
         setShowSetup(true);
@@ -395,7 +405,12 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
         toast("success", "Unlocked the whole book. Enjoy.");
         return;
       }
-      if (res.status === 401 || d.error === "no_pay_session") {
+      if (res.status === 401 || d.error === "no_pay_session" || d.error === "session_verify_failed") {
+        if (d.error === "session_verify_failed") {
+          console.warn("[silent-pay] verify failed:", d.detail);
+          if (payWallet) clearSessionKey(payWallet);
+          await fetch("/api/pay-session/revoke", { method: "POST", credentials: "include" }).catch(() => {});
+        }
         setSessionActive(false);
         setPendingWhole(true);
         setShowSetup(true);
@@ -535,10 +550,20 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
             (who read free), so it only appears for genuinely wallet-less readers. */}
         {!payWallet && !walletLoading && !isOwner && current + 1 < pages.length && !isPageUnlocked(pages[current + 1]) && chromeVisible && (
           <div className="absolute inset-x-0 bottom-24 z-30 mx-auto flex max-w-sm flex-col items-center gap-2 rounded-xl border border-outline-variant bg-surface-container-high p-4 text-center shadow-lg">
-            <p className="font-body-sm text-[13px] text-on-surface-variant">Your Skimflow wallet is being set up.</p>
-            <button onClick={() => void embedded.provision()} disabled={embedded.busy} className="btn-primary px-6 py-2">
-              {embedded.busy ? "Setting up your wallet…" : "Finish wallet setup"}
-            </button>
+            {signedOut ? (
+              <>
+                <p className="font-body-sm text-[13px] text-on-surface-variant">Sign in to keep reading.</p>
+                <Link href={loginHref} className="btn-primary px-6 py-2">Sign in to read on</Link>
+                <span className="font-body-sm text-[11px] text-outline">A free Skimflow wallet is created when you sign in.</span>
+              </>
+            ) : (
+              <>
+                <p className="font-body-sm text-[13px] text-on-surface-variant">Your Skimflow wallet is being set up.</p>
+                <button onClick={() => void embedded.provision()} disabled={embedded.busy} className="btn-primary px-6 py-2">
+                  {embedded.busy ? "Setting up your wallet…" : "Finish wallet setup"}
+                </button>
+              </>
+            )}
           </div>
         )}
       </div>
