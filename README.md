@@ -101,13 +101,25 @@ Every creator has a public profile and an RSS 2.0 feed, addressable by either UU
 - `/api/creators/:creatorId/feed.xml` — RSS 2.0 feed. Free posts syndicate in full; paid posts syndicate as the free teaser only, with a link back to Skimflow. Paid block content is never emitted.
 - `/api/creators/:creatorId/posts` — the public JSON posts API that backs the feed (`?page`, `?limit`).
 
-An optional [RSSHub](https://docs.rsshub.app/) route lives in [`integrations/rsshub/`](integrations/rsshub/) for syndication through the RSSHub ecosystem.
+Discovery is server-rendered: both the creator profile **and** every individual post page carry an `<link rel="alternate" type="application/rss+xml">` in their HTML `<head>`, so AI-native readers (e.g. [Folo](https://folo.is)) and the **RSSHub Radar** browser extension auto-detect a feed from any page. An optional [RSSHub](https://docs.rsshub.app/) route lives in [`integrations/rsshub/`](integrations/rsshub/) (`/skimflow/creator/:creatorId`, `?limit` supported) for syndication through the RSSHub ecosystem.
+
+---
+
+## Integrations
+
+Skimflow plugs into the tools creators already use — full guide at **`/docs/integrations`**.
+
+- **Ghost CMS sync.** Connect a Ghost blog once in **Settings → Integrations**. Publishing in Ghost fires a signed webhook; Skimflow fetches the full post via the Content API, auto-detects its type (article / book / picture / agent-skill), splits it into payable blocks, and either saves a **draft** (with an in-app notification) or **auto-publishes** per your default monetization. Credentials are AES-256-GCM encrypted at rest; the Admin API key (which signs/verifies webhooks) never leaves the server.
+- **x402 citation toll.** Every published article exposes `GET /api/articles/:postId/full-content` for AI agents and HTTP clients — one x402 USDC payment, to the **creator's** wallet (never a platform address), returns the whole article (all blocks, as HTML + clean plaintext). Free articles skip payment; this is separate from the human unlock flow.
+- **RSS auto-discovery.** Per-creator RSS 2.0 feeds, auto-discoverable from profile and post pages (see above).
+
+> **Env:** the Ghost integration requires `INTEGRATION_ENC_KEY` (a 32-byte key, `openssl rand -hex 32`) to encrypt stored credentials. Don't rotate it after creators have connected — existing credentials would become undecryptable.
 
 ---
 
 ## Routes
 
-`/` · `/for-you` (feed) · `/read/[slug]` (reader) · `/creator/[creatorId]` (public profile) · `/dashboard` (publish / earnings / wallet) · `/dashboard/create-book` (chapter builder) · `/dashboard/settings` · `/docs` · `/marketplace` · `/login` · `/terms` · `/admin/*` (moderation, payments, users, wallets, agents)
+`/` · `/for-you` (feed) · `/read/[slug]` (reader) · `/creator/[creatorId]` (public profile) · `/dashboard` (publish / earnings / wallet) · `/dashboard/create-book` (chapter builder) · `/dashboard/settings` (profile + integrations) · `/docs` · `/docs/integrations` · `/marketplace` · `/login` · `/terms` · `/admin/*` (moderation, payments, users, wallets, agents)
 
 ## API reference (selected)
 
@@ -121,6 +133,10 @@ An optional [RSSHub](https://docs.rsshub.app/) route lives in [`integrations/rss
 | `POST` | `/api/wallet/embedded` · `/embedded/setup` · `/api/wallet/withdraw` | Wallet provisioning (server-side), silent-pay setup, withdrawal. |
 | `POST` | `/api/creator/content` · `PATCH/GET/DELETE /api/creator/content/:id` | Publish / edit / load / remove content. |
 | `GET` | `/api/creators/:creatorId/posts` · `/feed.xml` | Public posts API + RSS feed (by UUID or username). |
+| `GET` | `/api/articles/:postId/full-content` | x402 citation toll — agents buy a whole article in one payment (402 → pay → 200 with all blocks as HTML + plaintext). |
+| `GET/PUT/DELETE` | `/api/creator/integrations/ghost` | Ghost connection (credentials encrypted at rest; never returned to the client). |
+| `POST` | `/api/webhooks/ghost?creator=:id` | Ghost "Post published" webhook — HMAC-verified, idempotent; detects type, splits, drafts / auto-publishes. |
+| `GET/POST` | `/api/notifications` | In-app notifications (list + mark read). |
 | `GET` | `/api/marketplace` · `/api/marketplace/search` | Feed listing + search. |
 | `POST` | `/api/webhooks/circle` | Circle settlement webhook (finalizes pending live payments). |
 
@@ -143,8 +159,9 @@ An optional [RSSHub](https://docs.rsshub.app/) route lives in [`integrations/rss
 apps/web        Next.js 15 (App Router, React 19) · Postgres · NextAuth · Tailwind design tokens
                 ├─ silent per-block pay sessions (Gateway burn intents)
                 ├─ Circle developer-controlled wallets (auto-provisioned) + admin external wallet
-                ├─ x402 well-known endpoints + agent-skills.md resource
-                ├─ public posts API + per-creator RSS feeds + profiles
+                ├─ x402 well-known endpoints + agent-skills.md resource + article citation toll
+                ├─ public posts API + per-creator RSS feeds + profiles (Folo / RSSHub discovery)
+                ├─ Ghost CMS sync (signed webhook → detect → split → draft/auto-publish; encrypted creds)
                 └─ creator dashboard, Books builder, admin/moderation suite
 apps/agent      LangChain buyer agent · x402 client · Guardian spend policy · test:x402 harness
 packages/sdk    arc · gateway (x402 settlement, EIP-3009) · guardian · x402 · pricing
