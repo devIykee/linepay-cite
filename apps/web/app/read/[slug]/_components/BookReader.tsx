@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount } from "wagmi";
 import type { Address } from "viem";
 import { useToast } from "@/components/Toaster";
@@ -80,7 +79,6 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
   // the "connect a wallet" gate on a page turn for users who already had an
   // embedded wallet. Mirror ChunkReader: only gate once we're sure there's none.
   const walletLoading = !address && embedded.status === null;
-  const canCreateEmbedded = embedded.status?.enabled === true && embedded.status?.isAdmin === false;
   // The wallet we actually pay from: the connected/embedded wallet if known,
   // otherwise the main wallet from the active session. Either is enough to sign
   // silent burns, so a funded reader can always turn the page.
@@ -428,17 +426,6 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
     if (blk != null) void payPage(blk, { sessionReady: true });
   }
 
-  async function createWallet() {
-    try {
-      await embedded.provision();
-      toast("success", "Wallet created. You can keep reading now.");
-    } catch (e) {
-      const msg = String((e as { message?: string })?.message ?? e);
-      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Wallet setup cancelled.");
-      else toast("error", msg, "Couldn't create wallet");
-    }
-  }
-
   // Tap zones: left 30% → prev, right 30% → next, centre → toggle chrome.
   function onZoneTap(zone: "prev" | "next" | "center") {
     if (zone === "prev") goPrev();
@@ -548,13 +535,10 @@ export default function BookReader({ slug, title, creatorHandle, pricePerBlock, 
             (who read free), so it only appears for genuinely wallet-less readers. */}
         {!payWallet && !walletLoading && !isOwner && current + 1 < pages.length && !isPageUnlocked(pages[current + 1]) && chromeVisible && (
           <div className="absolute inset-x-0 bottom-24 z-30 mx-auto flex max-w-sm flex-col items-center gap-2 rounded-xl border border-outline-variant bg-surface-container-high p-4 text-center shadow-lg">
-            <p className="font-body-sm text-[13px] text-on-surface-variant">Create your free wallet to keep reading.</p>
-            {canCreateEmbedded && (
-              <button onClick={createWallet} disabled={embedded.busy} className="btn-primary px-6 py-2">
-                {embedded.busy ? "Creating…" : "Create your free wallet"}
-              </button>
-            )}
-            <ConnectButton />
+            <p className="font-body-sm text-[13px] text-on-surface-variant">Your Skimflow wallet is being set up.</p>
+            <button onClick={() => void embedded.provision()} disabled={embedded.busy} className="btn-primary px-6 py-2">
+              {embedded.busy ? "Setting up your wallet…" : "Finish wallet setup"}
+            </button>
           </div>
         )}
       </div>

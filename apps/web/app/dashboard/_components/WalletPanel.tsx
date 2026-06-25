@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { useToast } from "@/components/Toaster";
-import { executeChallenge } from "@/lib/useEmbeddedWallet";
 import { formatUsdc } from "@/lib/money";
 
 const explorer = process.env.NEXT_PUBLIC_ARC_EXPLORER_URL || "https://testnet.arcscan.app";
@@ -63,42 +62,27 @@ export default function WalletPanel({ impersonating }: { impersonating: boolean 
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Balance + address */}
-      <div className="card flex flex-col gap-4">
-        <div className="flex flex-wrap items-end justify-between gap-4">
-          <div>
-            <div className="font-label-caps text-label-caps text-on-surface-variant">USDC balance</div>
-            <div className="font-data-mono text-[28px] text-on-surface">
-              {data.balance ? formatUsdc(data.balance.usdc) : "—"} <span className="text-[14px] text-outline">USDC</span>
-            </div>
-            {data.balance && (
-              <div className="font-body-sm text-[12px] text-outline">Gas: {formatUsdc(data.balance.gas)}</div>
-            )}
-          </div>
-          <button onClick={() => void load()} className="btn-outline px-3 py-1.5 text-[12px]">
-            Refresh
+      {/* Wallet address — the balance itself lives in the dashboard hero, so it's
+          shown once. This card is just the "receive funds here" address. */}
+      {data.fundingAddress && (
+        <div className="card">
+          <div className="mb-1 font-label-caps text-label-caps text-outline">Your wallet address (receive funds here)</div>
+          <button
+            onClick={async () => {
+              try {
+                await navigator.clipboard.writeText(data.fundingAddress!);
+                toast("success", "Address copied.");
+              } catch {
+                toast("error", "Couldn’t copy. Select it manually.");
+              }
+            }}
+            className="font-data-mono text-[12px] text-primary hover:underline"
+            title="Copy address"
+          >
+            {data.fundingAddress}
           </button>
         </div>
-        {data.fundingAddress && (
-          <div className="rounded-lg border border-outline-variant p-3">
-            <div className="mb-1 font-label-caps text-label-caps text-outline">Your wallet address (receive funds here)</div>
-            <button
-              onClick={async () => {
-                try {
-                  await navigator.clipboard.writeText(data.fundingAddress!);
-                  toast("success", "Address copied.");
-                } catch {
-                  toast("error", "Couldn’t copy. Select it manually.");
-                }
-              }}
-              className="font-data-mono text-[12px] text-primary hover:underline"
-              title="Copy address"
-            >
-              {data.fundingAddress}
-            </button>
-          </div>
-        )}
-      </div>
+      )}
 
       {/* Withdraw (embedded wallets only) */}
       {data.hasEmbedded && !data.isAdmin && (
@@ -165,7 +149,7 @@ export default function WalletPanel({ impersonating }: { impersonating: boolean 
   );
 }
 
-/** Withdraw USDC from the embedded wallet to an external address (PIN-confirmed). */
+/** Withdraw USDC from the user's wallet to an external address (server-signed). */
 function WithdrawForm({
   balance,
   disabled,
@@ -186,7 +170,7 @@ function WithdrawForm({
     for (let i = 0; i < 30; i++) {
       await new Promise((r) => setTimeout(r, 4000));
       try {
-        const r = await fetch(`/api/wallet/withdraw/status?txId=${encodeURIComponent(txId)}`, {
+        const r = await fetch(`/api/wallet/tx-status?txId=${encodeURIComponent(txId)}`, {
           credentials: "include",
         });
         const d = await r.json();
@@ -225,22 +209,15 @@ function WithdrawForm({
         toast("error", d.message ?? d.error ?? "Withdrawal couldn’t be started.");
         return;
       }
-      // Execute the PIN challenge in the browser, then poll for settlement.
+      // Signed server-side with the entity secret — no PIN. Poll for settlement.
       setStatus("pending");
-      toast("info", "Confirm the withdrawal with your PIN…");
-      await executeChallenge(d.challengeId, { userToken: d.userToken, encryptionKey: d.encryptionKey });
       toast("info", "Withdrawal submitted. Settling on Arc…");
       setAmount("");
       setDestination("");
-      // The transfer challenge returns once submitted; Circle assigns a tx we
-      // surface via history. We don't get the txId back from execute(), so just
-      // refresh history (the outgoing row will appear as pending).
-      onDone();
-      setStatus("idle");
+      await pollStatus(d.txId as string);
     } catch (e) {
       const msg = String((e as { message?: string })?.message ?? e);
-      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Withdrawal cancelled.");
-      else toast("error", msg, "Withdrawal failed");
+      toast("error", msg, "Withdrawal failed");
       setStatus("idle");
     } finally {
       setBusy(false);

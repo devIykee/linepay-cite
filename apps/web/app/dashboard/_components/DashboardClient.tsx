@@ -9,6 +9,7 @@ import { useToast } from "@/components/Toaster";
 import ContentManager from "./ContentManager";
 import EarningsPanel from "./EarningsPanel";
 import WalletPanel from "./WalletPanel";
+import BalanceHero from "./BalanceHero";
 
 interface User {
   id: string;
@@ -59,6 +60,9 @@ export default function DashboardClient({ user, impersonating }: { user: User; i
         </div>
       </header>
 
+      {/* Primary block: balance front and centre. */}
+      <BalanceHero />
+
       {!walletLinked && !impersonating && <WalletBanner onLinked={() => setWalletLinked(true)} />}
 
       <nav className="mb-8 flex gap-2 border-b border-outline-variant">
@@ -85,27 +89,49 @@ export default function DashboardClient({ user, impersonating }: { user: User; i
 }
 
 function WalletBanner({ onLinked }: { onLinked: () => void }) {
+  const { status: emb, busy: embBusy, provision } = useEmbeddedWallet();
+  const toast = useToast();
+
+  // Status still loading — say nothing rather than flash a setup prompt.
+  if (!emb) return null;
+
+  // Admins are the ONLY users who connect/link an external wallet.
+  if (emb.isAdmin) return <AdminWalletBanner onLinked={onLinked} />;
+
+  // Everyone else has a wallet auto-provisioned at signup. This only shows in the
+  // rare case provisioning didn't land — offer a silent retry, no connect/link.
+  async function finishSetup() {
+    try {
+      await provision();
+      toast("success", "Your wallet is ready. Payouts route here automatically.");
+      onLinked();
+    } catch (e) {
+      toast("error", String((e as Error)?.message ?? e), "Couldn't finish wallet setup");
+    }
+  }
+
+  return (
+    <div className="mb-6 rounded-lg border border-yellow-400 bg-yellow-50 px-4 py-4">
+      <div className="mb-2 font-label-lg text-yellow-900">Finishing your wallet setup</div>
+      <p className="mb-3 font-body-sm text-[12px] text-yellow-800">
+        Your Skimflow wallet receives your USDC earnings automatically. Tap to finish setup.
+      </p>
+      <button onClick={finishSetup} disabled={embBusy} className="btn-primary px-5 py-2 disabled:opacity-50">
+        {embBusy ? "Setting up…" : "Finish wallet setup"}
+      </button>
+    </div>
+  );
+}
+
+/** Admin-only: connect/link an external payout wallet. */
+function AdminWalletBanner({ onLinked }: { onLinked: () => void }) {
   const [wallet, setWallet] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const { address, isConnected } = useAccount();
   const editedRef = useRef(false); // don't clobber a manually-typed address
-  const { status: emb, busy: embBusy, provision } = useEmbeddedWallet();
-  const toast = useToast();
-  const offerEmbedded = emb?.enabled !== false && !emb?.isAdmin;
 
-  async function createFree() {
-    try {
-      await provision();
-      toast("success", "Your free wallet is ready. Payouts route here automatically.");
-      onLinked();
-    } catch (e) {
-      toast("error", String((e as Error)?.message ?? e), "Couldn't create your wallet");
-    }
-  }
-
-  // Auto-fill the payout address from the connected wallet (until the user
-  // types their own).
+  // Auto-fill the payout address from the connected wallet (until the user types their own).
   useEffect(() => {
     if (address && !editedRef.current) setWallet(address);
   }, [address]);
@@ -130,17 +156,7 @@ function WalletBanner({ onLinked }: { onLinked: () => void }) {
 
   return (
     <div className="mb-6 rounded-lg border border-yellow-400 bg-yellow-50 px-4 py-4">
-      <div className="mb-2 font-label-lg text-yellow-900">Set up your wallet to receive payments</div>
-      {offerEmbedded && (
-        <div className="mb-3">
-          <button onClick={createFree} disabled={embBusy} className="btn-primary px-5 py-2 disabled:opacity-50">
-            {embBusy ? "Creating…" : "Create your free wallet"}
-          </button>
-          <p className="mt-1 font-body-sm text-[12px] text-yellow-800">
-            No download, secured by a PIN. Payouts route here automatically. Or paste your own address below.
-          </p>
-        </div>
-      )}
+      <div className="mb-2 font-label-lg text-yellow-900">Connect your admin payout wallet</div>
       {!isConnected && (
         <div className="mb-3">
           <ConnectButton accountStatus="address" chainStatus="none" showBalance={false} />

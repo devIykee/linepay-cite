@@ -2,7 +2,6 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import Link from "next/link";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
 import { useAccount, useChainId, useSignTypedData, useSwitchChain } from "wagmi";
 import { readContract, writeContract, waitForTransactionReceipt } from "@wagmi/core";
 import { erc20Abi } from "viem";
@@ -128,8 +127,6 @@ export default function ChunkReader(props: Props) {
   // connect MetaMask. Treat "unknown" as loading. An external (wagmi) address
   // is known synchronously, so a connected user is never blocked on this.
   const walletLoading = !address && embedded.status === null;
-  // Admins always use an external wallet (no embedded provisioning offered).
-  const canCreateEmbedded = embedded.status?.enabled === true && embedded.status?.isAdmin === false;
 
   // Hydrate unlocked chunks + the saved reading position from localStorage so a
   // refresh (or a later visit) keeps progress and the scroll spot.
@@ -616,22 +613,6 @@ export default function ChunkReader(props: Props) {
     if (blk != null) void unlock(blk, { sessionReady: true });
   }
 
-  /** Create the free embedded wallet, then continue to unlock the pending block. */
-  async function createWalletThenUnlock(blockIndex: number) {
-    setPaying(blockIndex);
-    try {
-      await embedded.provision();
-      toast("success", "Wallet created. You can pay per block now.");
-      // status refresh is async; the user can tap Unlock once it lands.
-    } catch (e) {
-      const msg = String((e as { message?: string })?.message ?? e);
-      if (/rejected|denied|cancell?ed/i.test(msg)) toast("info", "Wallet setup cancelled.");
-      else toast("error", msg, "Couldn't create wallet");
-    } finally {
-      setPaying(null);
-    }
-  }
-
   return (
     <div className="mx-auto max-w-2xl px-margin-mobile py-stack-lg md:px-margin-desktop">
       <div className="mb-6 flex items-center justify-between gap-2">
@@ -771,21 +752,16 @@ export default function ChunkReader(props: Props) {
                     </span>
                   ) : !hasWallet ? (
                     <div className="flex flex-col items-center gap-2 rounded-2xl border border-outline-variant bg-surface/70 px-5 py-4 backdrop-blur">
-                      {canCreateEmbedded && (
-                        <button
-                          onClick={() => createWalletThenUnlock(c.blockIndex)}
-                          disabled={paying !== null || embedded.busy}
-                          className="rounded-full bg-primary px-8 py-3 font-label-caps text-label-caps text-on-primary transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
-                        >
-                          {paying === c.blockIndex || embedded.busy ? "Creating wallet…" : "Create your free wallet"}
-                        </button>
-                      )}
-                      <ConnectButton />
-                      {canCreateEmbedded && (
-                        <span className="font-body-sm text-[11px] text-outline">
-                          Free wallet (no app), or connect your own.
-                        </span>
-                      )}
+                      <button
+                        onClick={() => void embedded.provision()}
+                        disabled={paying !== null || embedded.busy}
+                        className="rounded-full bg-primary px-8 py-3 font-label-caps text-label-caps text-on-primary transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
+                      >
+                        {embedded.busy ? "Setting up your wallet…" : "Finish wallet setup"}
+                      </button>
+                      <span className="font-body-sm text-[11px] text-outline">
+                        Your Skimflow wallet is being set up. Tap to retry, then unlock.
+                      </span>
                     </div>
                   ) : (
                     <>
@@ -803,18 +779,9 @@ export default function ChunkReader(props: Props) {
                         className="inline-flex min-h-[44px] items-center gap-2 rounded-full bg-primary px-8 py-3 font-label-caps text-label-caps text-on-primary shadow-lg shadow-primary/20 ring-1 ring-black/5 backdrop-blur transition-all hover:opacity-90 active:scale-[0.98] disabled:opacity-50"
                       >
                         {paying === c.blockIndex
-                          ? sessionActive ? "Unlocking…" : walletKind === "embedded" ? "Setting up…" : "Confirm in wallet…"
+                          ? sessionActive ? "Unlocking…" : "Setting up…"
                           : "Read on"}
                       </button>
-                      {!sessionActive && walletKind === "external" && (
-                        <button
-                          onClick={() => unlock(c.blockIndex, { forceWallet: true })}
-                          disabled={paying !== null}
-                          className="font-body-sm text-[12px] text-outline hover:text-primary"
-                        >
-                          or pay just this block with your wallet
-                        </button>
-                      )}
                     </>
                   )}
                 </div>

@@ -49,7 +49,6 @@ export default function ContentManager({ impersonating }: { impersonating: boole
   const [title, setTitle] = useState("");
   const [contentType, setContentType] = useState<"article" | "agent-skills" | "picture">("article");
   const [body, setBody] = useState("");
-  const [importSource, setImportSource] = useState<"medium" | "github">("medium");
   // Picture Skim-Flow image links (in order; index 0 is the free preview image).
   const [images, setImages] = useState<{ url: string; caption: string }[]>([]);
   const [imgUrl, setImgUrl] = useState("");
@@ -60,19 +59,11 @@ export default function ContentManager({ impersonating }: { impersonating: boole
   const [price, setPrice] = useState("0.05");
   const [preview, setPreview] = useState<Preview | null>(null);
   const [showChunks, setShowChunks] = useState(false);
-  const [importUrl, setImportUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const [published, setPublished] = useState<{ readerUrl: string; agentUrl?: string } | null>(null);
   // When set, the editor is updating an existing piece (PATCH) rather than
   // creating a new one (POST). Its content_type is locked while editing.
   const [editingId, setEditingId] = useState<string | null>(null);
-
-  // Import provenance (recorded for attribution; no ownership-verification gate).
-  const [sourceUrl, setSourceUrl] = useState<string | null>(null);
-  const [sourcePlatform, setSourcePlatform] = useState<string | null>(null);
-  // An imported Agent Skill whose .md had no description — publish is blocked
-  // until the creator fills the summary (§1d: no silently-incomplete skills).
-  const [needsMeta, setNeedsMeta] = useState(false);
 
   const loadList = useCallback(() => {
     fetch("/api/creator/content", { credentials: "include" })
@@ -122,39 +113,6 @@ export default function ContentManager({ impersonating }: { impersonating: boole
     return () => clearTimeout(t);
   }, [body, contentType, price, title, summary]);
 
-  async function doImport() {
-    if (!importUrl.trim()) return;
-    setBusy(true);
-    try {
-      const r = await fetch("/api/import-url", {
-        method: "POST",
-        credentials: "include",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ url: importUrl }),
-      });
-      const d = await r.json();
-      if (r.ok) {
-        setTitle(d.title ?? title);
-        setBody(d.content ?? "");
-        setContentType(d.contentType === "agent-skills" || d.format === "markdown" ? "agent-skills" : "article");
-        if (typeof d.summary === "string") setSummary(d.summary);
-        if (typeof d.tags === "string" && d.tags) setTags(d.tags);
-        setSourceUrl(d.sourceUrl ?? importUrl);
-        setSourcePlatform(d.sourcePlatform ?? null);
-        setNeedsMeta(!!d.needsMetadata);
-        if (d.needsMetadata) {
-          toast("warning", "Imported. Add a description before publishing this Agent Skill (the file had none).");
-        } else {
-          toast("success", "Imported. Review and publish when ready.");
-        }
-      } else {
-        toast("error", d.message ?? d.error ?? "Import failed");
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
   /** Add a Skim-Flow image: normalize the link, then confirm it actually loads
    *  as an image before accepting it (the load IS the validity check, §5a). */
   function addImage() {
@@ -193,7 +151,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
 
   function resetEditor() {
     setTitle(""); setBody(""); setSummary(""); setTags(""); setPreview(null);
-    setSourceUrl(null); setSourcePlatform(null); setNeedsMeta(false); setImages([]);
+    setImages([]);
     setEditingId(null);
   }
 
@@ -233,7 +191,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         const method = editingId ? "PATCH" : "POST";
         const reqBody = editingId
           ? { title, body: contentType === "picture" ? undefined : body, pricePerBlock: price, summary, tags, status: "draft" }
-          : { title, contentType, body: contentType === "picture" ? "" : body, images: contentType === "picture" ? images : undefined, pricePerBlock: price, summary, tags, status: "draft", sourceUrl };
+          : { title, contentType, body: contentType === "picture" ? "" : body, images: contentType === "picture" ? images : undefined, pricePerBlock: price, summary, tags, status: "draft" };
         await queueRequest({ url, method, body: JSON.stringify(reqBody), label: title || "Untitled draft" });
         toast("info", "You're offline — draft saved on this device and will sync automatically when you're back online.");
         resetEditor();
@@ -299,7 +257,6 @@ export default function ContentManager({ impersonating }: { impersonating: boole
           summary,
           tags,
           status,
-          sourceUrl,
         }),
       });
       const d = await r.json();
@@ -308,13 +265,13 @@ export default function ContentManager({ impersonating }: { impersonating: boole
         // Keep the editor cleared (the draft is saved) and prompt wallet setup.
         setWalletGatedDraft(d.contentId ?? null);
         setTitle(""); setBody(""); setSummary(""); setTags(""); setPreview(null);
-        setSourceUrl(null); setSourcePlatform(null); setNeedsMeta(false); setImages([]);
+        setImages([]);
         loadList();
         toast("info", d.message ?? "Saved to drafts. Create a wallet to publish.");
       } else if (r.ok) {
         if (status === "published") setPublished({ readerUrl: d.readerUrl, agentUrl: d.agentUrl });
         setTitle(""); setBody(""); setSummary(""); setTags(""); setPreview(null);
-        setSourceUrl(null); setSourcePlatform(null); setNeedsMeta(false); setImages([]);
+        setImages([]);
         loadList();
         toast(
           "success",
@@ -400,49 +357,6 @@ export default function ContentManager({ impersonating }: { impersonating: boole
 
   return (
     <div className="flex flex-col gap-6">
-      {/* Import — exactly two sources: Medium articles, or GitHub .md skills. */}
-      <div className="card">
-        <h2 className="mb-3 font-headline-sm text-headline-sm">Import</h2>
-        <div className="mb-3 flex gap-2">
-          <button
-            onClick={() => setImportSource("medium")}
-            aria-pressed={importSource === "medium"}
-            className={`rounded-full px-4 py-1.5 font-label-caps text-label-caps transition-colors ${importSource === "medium" ? "bg-primary text-on-primary" : "border border-outline-variant text-on-surface-variant hover:border-primary hover:text-primary"}`}
-          >
-            From Medium
-          </button>
-          <button
-            onClick={() => setImportSource("github")}
-            aria-pressed={importSource === "github"}
-            className={`rounded-full px-4 py-1.5 font-label-caps text-label-caps transition-colors ${importSource === "github" ? "bg-primary text-on-primary" : "border border-outline-variant text-on-surface-variant hover:border-primary hover:text-primary"}`}
-          >
-            From GitHub (Agent Skill)
-          </button>
-        </div>
-        <div className="flex flex-wrap gap-2">
-          <input
-            value={importUrl}
-            onChange={(e) => setImportUrl(e.target.value)}
-            placeholder={importSource === "medium" ? "https://medium.com/…/your-article" : "https://github.com/…/skill.md (or raw .md URL)"}
-            className="flex-grow rounded-lg border border-outline px-3 py-2 text-body-sm"
-          />
-          <button onClick={doImport} disabled={busy || disabled} className="btn-primary px-5 py-2">Import &amp; Monetize</button>
-        </div>
-        <p className="mt-2 font-body-sm text-[12px] text-on-surface-variant">
-          Want to share an X post? Copy and paste the text into the editor below. It publishes as a single chunk.
-        </p>
-
-        {/* Import provenance (informational — publishing is never gated). */}
-        {sourceUrl && (
-          <div className="mt-4 rounded-lg bg-surface-container-low/60 p-3">
-            <span className="font-label-caps text-label-caps text-on-surface-variant">
-              Imported source{sourcePlatform ? ` · ${sourcePlatform}` : ""}
-            </span>
-            <p className="mt-1 truncate font-body-sm text-[12px] text-outline">{sourceUrl}</p>
-          </div>
-        )}
-      </div>
-
       {/* Editor */}
       <div className="card">
         <div className="mb-4 flex items-center justify-between gap-2">
@@ -523,13 +437,6 @@ export default function ContentManager({ impersonating }: { impersonating: boole
           </div>
         )}
 
-        {/* §1d: imported skill had no description — require one before publishing. */}
-        {needsMeta && !summary.trim() && (
-          <div className="mt-4 rounded-lg border border-primary/40 bg-primary/5 p-3 font-body-sm text-[13px] text-on-surface">
-            This skill&apos;s file had no description. Add a <strong>Summary</strong> above before publishing.
-          </div>
-        )}
-
         <div className="mt-4 flex flex-wrap gap-2">
           {contentType === "article" && (
             <button onClick={applyAutoChunk} disabled={!body.trim() || disabled} className="btn-outline px-5 py-2">Auto-chunk</button>
@@ -542,8 +449,7 @@ export default function ContentManager({ impersonating }: { impersonating: boole
             onClick={() => publish("published")}
             disabled={
               busy || disabled || !title || !hasContent ||
-              (contentType === "article" && !!preview?.hasErrors) ||
-              (needsMeta && !summary.trim())
+              (contentType === "article" && !!preview?.hasErrors)
             }
             className="btn-primary px-6 py-2"
           >

@@ -9,7 +9,6 @@ import { formatUsdc, toDecimal } from "@/lib/money";
 import { useToast } from "@/components/Toaster";
 import { wagmiConfig } from "@/lib/wagmi";
 import { getOrCreateSessionAccount } from "@/lib/session-key-client";
-import { executeChallenge } from "@/lib/useEmbeddedWallet";
 import { paySessionAuthMessage, GATEWAY_WALLET_ADDRESS, ARC_USDC_ADDRESS } from "@/lib/burn-intent";
 
 const ARC_CHAIN_ID = Number(process.env.NEXT_PUBLIC_ARC_CHAIN_ID ?? "5042002");
@@ -184,8 +183,13 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
     await waitForTransactionReceipt(wagmiConfig, { hash: delegateHash });
   }
 
-  /** Embedded (Circle) setup: each step is a backend challenge executed via PIN. */
-  async function runEmbeddedChallenge(
+  /**
+   * Embedded (Circle developer-controlled) setup: each step is signed
+   * server-side with the entity secret. The route returns a Circle txId; we poll
+   * its status to terminal before moving on, since deposit depends on approve and
+   * addDelegate on deposit. No PIN — the wallet is custodial.
+   */
+  async function runEmbeddedStep(
     step: "approve" | "deposit" | "addDelegate",
     sessionAddress: Address,
     capValue: string
@@ -197,23 +201,32 @@ export default function PaySetupModal({ mainWallet, kind = "external", suggested
     });
     const data = await res.json();
     if (!res.ok) throw new Error(data.message ?? data.error ?? "Setup step failed.");
-    await executeChallenge(data.challengeId, {
-      userToken: data.userToken,
-      encryptionKey: data.encryptionKey,
-    });
+    await waitForTx(data.txId as string);
+  }
+
+  /** Poll a Circle transaction until it confirms (or throw if it fails). */
+  async function waitForTx(txId: string) {
+    for (let i = 0; i < 40; i++) {
+      const r = await fetch(`/api/wallet/tx-status?txId=${encodeURIComponent(txId)}`, { credentials: "include" });
+      const d = await r.json().catch(() => ({}));
+      if (d.status === "confirmed") return;
+      if (d.status === "failed") throw new Error("A setup transaction failed on-chain.");
+      await new Promise((res) => setTimeout(res, 1500));
+    }
+    throw new Error("Setup is taking longer than expected. Please try again.");
   }
 
   async function runEmbeddedSetup(sessionAddress: Address, capWei: bigint, capValue: string, forceDeposit: boolean) {
     // Skip straight to addDelegate when already funded — unless adding funds.
     const alreadyFunded = !forceDeposit && (await gatewayAvailable()) >= capWei;
     if (!alreadyFunded) {
-      setStep("Adding funds (enter your PIN)…");
-      await runEmbeddedChallenge("approve", sessionAddress, capValue);
+      setStep("Preparing your reading balance…");
+      await runEmbeddedStep("approve", sessionAddress, capValue);
       setStep("Adding funds to your reading balance…");
-      await runEmbeddedChallenge("deposit", sessionAddress, capValue);
+      await runEmbeddedStep("deposit", sessionAddress, capValue);
     }
     setStep("Turning on one-tap reading…");
-    await runEmbeddedChallenge("addDelegate", sessionAddress, capValue);
+    await runEmbeddedStep("addDelegate", sessionAddress, capValue);
   }
 
   /**
