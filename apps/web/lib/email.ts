@@ -73,6 +73,10 @@ function firstNameFromFullName(fullName: string): string {
   return capitalizeWord(trimmed.split(/\s+/)[0] ?? trimmed);
 }
 
+function emailLocalPart(email: string): string {
+  return email.split("@")[0]?.split("+")[0]?.trim().toLowerCase() ?? "";
+}
+
 /** True when a string looks like a handle/username, not a person's name. */
 function looksLikeHandle(value: string, handle?: string | null): boolean {
   const v = value.trim().toLowerCase();
@@ -84,27 +88,54 @@ function looksLikeHandle(value: string, handle?: string | null): boolean {
   return false;
 }
 
+/** Auto-generated display_name copied from the email prefix (eniolaomojolowo@gmail.com). */
+function isEmailLocalSlug(value: string, email: string): boolean {
+  const v = value.trim().toLowerCase().replace(/[^a-z0-9]/g, "");
+  const local = emailLocalPart(email).replace(/[^a-z0-9]/g, "");
+  if (!v || !local || value.includes(" ")) return false;
+  return v === local;
+}
+
+/** Only when the address is clearly first.last@ or first_last@ — not one blob. */
 function firstNameFromEmail(email: string): string | null {
-  const local = email.split("@")[0]?.split("+")[0]?.trim() ?? "";
+  const local = emailLocalPart(email);
   if (!local) return null;
-  const segment = local.split(/[._-]/).find((p) => p.length >= 2);
-  if (!segment || /^\d+$/.test(segment)) return null;
-  return capitalizeWord(segment);
+  const parts = local.split(/[._-]/).filter((p) => p.length >= 2 && !/^\d+$/.test(p));
+  if (parts.length < 2) return null;
+  return capitalizeWord(parts[0]);
 }
 
 /**
  * Best-effort first name for email greetings.
- * Prefers OAuth `name` (e.g. "Eniola Omojolowo" → Eniola), skips handle-like display names.
+ * Prefers OAuth `name` with a space (e.g. "Eniola Omojolowo" → Eniola).
  */
 export function emailGreetingName(user: EmailRecipient): string {
-  if (user.name?.trim() && !looksLikeHandle(user.name, user.handle)) {
-    return firstNameFromFullName(user.name);
+  const oauthName = user.name?.trim();
+  if (oauthName?.includes(" ") && !looksLikeHandle(oauthName, user.handle)) {
+    return firstNameFromFullName(oauthName);
   }
-  if (user.display_name?.trim() && !looksLikeHandle(user.display_name, user.handle)) {
-    return firstNameFromFullName(user.display_name);
+
+  const display = user.display_name?.trim();
+  if (
+    display &&
+    !looksLikeHandle(display, user.handle) &&
+    !isEmailLocalSlug(display, user.email) &&
+    (display.includes(" ") || /^[A-Z][a-z]{1,31}$/.test(display))
+  ) {
+    return firstNameFromFullName(display);
   }
+
+  if (oauthName && !looksLikeHandle(oauthName, user.handle) && !isEmailLocalSlug(oauthName, user.email)) {
+    return firstNameFromFullName(oauthName);
+  }
+
+  if (display && !looksLikeHandle(display, user.handle) && !isEmailLocalSlug(display, user.email)) {
+    return firstNameFromFullName(display);
+  }
+
   const fromEmail = firstNameFromEmail(user.email);
   if (fromEmail) return fromEmail;
+
   return "there";
 }
 
