@@ -93,8 +93,34 @@ function escapeHtml(raw: string): string {
     .replace(/"/g, "&quot;");
 }
 
+function safeHref(url: string): string | null {
+  try {
+    const u = new URL(url.trim());
+    if (u.protocol !== "http:" && u.protocol !== "https:") return null;
+    return u.href;
+  } catch {
+    return null;
+  }
+}
+
 function bodyToHtml(body: string): string {
-  return escapeHtml(body).replace(/\n/g, "<br/>");
+  // Markdown links: [link text](https://example.com)
+  let html = escapeHtml(body).replace(
+    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
+    (_match, label: string, url: string) => {
+      const href = safeHref(url);
+      if (!href) return _match;
+      return `<a href="${href}" style="color:${ACCENT};text-decoration:underline;">${label}</a>`;
+    }
+  );
+  // Bare URLs become clickable when not already part of a markdown link.
+  html = html.replace(/(^|[\s>])(https?:\/\/[^\s<]+)/g, (match, prefix: string, url: string) => {
+    const href = safeHref(url.replace(/[.,;:!?)]+$/, ""));
+    if (!href) return match;
+    const trailing = url.slice(href.length);
+    return `${prefix}<a href="${href}" style="color:${ACCENT};text-decoration:underline;">${href}</a>${escapeHtml(trailing)}`;
+  });
+  return html.replace(/\n/g, "<br/>");
 }
 
 /** Wraps Resend send — logs success/failure, never throws. */

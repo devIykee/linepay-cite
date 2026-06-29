@@ -194,6 +194,10 @@ function AdminEmailInner() {
             placeholder="Write your message…"
             className="w-full rounded-lg border border-outline px-3 py-2 font-body-sm text-body-sm"
           />
+          <p className="mt-2 font-body-sm text-[12px] text-on-surface-variant">
+            Links: paste a URL directly, or use{" "}
+            <code className="rounded bg-surface-variant px-1">[link text](https://…)</code>
+          </p>
         </div>
 
         {err && <p className="mb-3 font-body-sm text-red-600">{err}</p>}
