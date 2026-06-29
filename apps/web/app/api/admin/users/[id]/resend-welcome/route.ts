@@ -22,8 +22,10 @@ export async function POST(_req: Request, ctx: { params: Promise<{ id: string }>
     if (!user.email?.trim()) throw new HttpError(400, "no_email", "User has no email address.");
 
     await sendWelcomeEmail({
-      name: user.display_name ?? user.name ?? "there",
       email: user.email,
+      name: user.name,
+      display_name: user.display_name,
+      handle: user.handle,
     });
 
     await recordAdminEvent({

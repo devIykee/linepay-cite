@@ -54,8 +54,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           }
           try {
             await sendWelcomeEmail({
-              name: dbUser.display_name ?? dbUser.name ?? "there",
               email: dbUser.email,
+              name: dbUser.name,
+              display_name: dbUser.display_name,
+              handle: dbUser.handle,
             });
           } catch (e) {
             console.error("[auth] welcome email failed:", (e as Error)?.message ?? e);

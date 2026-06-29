@@ -238,8 +238,8 @@ function AdminEmailInner() {
             className="w-full rounded-lg border border-outline px-3 py-2 font-body-sm text-body-sm"
           />
           <p className="mt-2 font-body-sm text-[12px] text-on-surface-variant">
-            Links: paste a URL directly, or use{" "}
-            <code className="rounded bg-surface-variant px-1">[link text](https://…)</code>
+            <strong>Markdown supported:</strong> **bold**, *italic*, ## headings, lists,{" "}
+            <code className="rounded bg-surface-variant px-1">[links](https://…)</code>, `code`, &gt; quotes
           </p>
         </div>
 
