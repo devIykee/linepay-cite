@@ -334,23 +334,24 @@ export async function listUsers(f: UserListFilters = {}): Promise<{ rows: UserLi
   return { rows, total: Number(totalRow?.count ?? 0) };
 }
 
-export interface EmailRecipient {
+export interface EmailRecipientRow {
   id: string;
   email: string;
   display_name: string | null;
   name: string | null;
+  handle: string | null;
 }
 
 /** Users with a deliverable email address — for admin broadcast sends. */
-export function listUsersForEmail(role?: UserRole): Promise<EmailRecipient[]> {
+export function listUsersForEmail(role?: UserRole): Promise<EmailRecipientRow[]> {
   const where = ["email IS NOT NULL", "TRIM(email) <> ''", "suspended = false"];
   const params: unknown[] = [];
   if (role) {
     params.push(role);
     where.push(`role = $${params.length}`);
   }
-  return query<EmailRecipient>(
-    `SELECT id, email, display_name, name FROM users WHERE ${where.join(" AND ")} ORDER BY created_at ASC`,
+  return query<EmailRecipientRow>(
+    `SELECT id, email, display_name, name, handle FROM users WHERE ${where.join(" AND ")} ORDER BY created_at ASC`,
     params
   );
 }

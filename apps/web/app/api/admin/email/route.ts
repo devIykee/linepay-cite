@@ -1,7 +1,7 @@
 import { NextRequest } from "next/server";
 import { requireAdmin, errorResponse, HttpError } from "@/lib/session";
 import { getUserById, listUsersForEmail, recordAdminEvent } from "@/lib/store";
-import { emailProviderStatus, sendAdminMessage } from "@/lib/email";
+import { emailProviderStatus, sendAdminBroadcast, sendAdminMessage } from "@/lib/email";
 import { envLimit, rateLimit, rateLimitResponse } from "@/lib/rate-limit";
 import type { UserRole } from "@/lib/types";
 
@@ -10,7 +10,6 @@ export const dynamic = "force-dynamic";
 
 const MAX_SUBJECT = 200;
 const MAX_BODY = 10_000;
-const BROADCAST_BATCH = 10;
 
 type EmailTarget = "user" | "all" | "creators";
 
@@ -27,48 +26,6 @@ function validateContent(subject: unknown, body: unknown): { subject: string; bo
   if (subj.length > MAX_SUBJECT) throw new HttpError(400, "subject_too_long", `Subject max ${MAX_SUBJECT} chars.`);
   if (text.length > MAX_BODY) throw new HttpError(400, "body_too_long", `Body max ${MAX_BODY} chars.`);
   return { subject: subj, body: text };
-}
-
-async function sendBatch(
-  recipients: Array<{ id: string; email: string; display_name: string | null; name: string | null }>,
-  subject: string,
-  body: string
-): Promise<{ sent: number; failed: number; errors: string[]; errorSummary?: string }> {
-  let sent = 0;
-  let failed = 0;
-  const errors: string[] = [];
-  const errorCounts = new Map<string, number>();
-
-  for (let i = 0; i < recipients.length; i += BROADCAST_BATCH) {
-    const batch = recipients.slice(i, i + BROADCAST_BATCH);
-    const results = await Promise.all(
-      batch.map((r) =>
-        sendAdminMessage({
-          to: r.email,
-          name: r.display_name ?? r.name ?? undefined,
-          subject,
-          body,
-        })
-      )
-    );
-    for (let j = 0; j < results.length; j++) {
-      if (results[j].ok) sent++;
-      else {
-        failed++;
-        const reason = results[j].error ?? "failed";
-        errorCounts.set(reason, (errorCounts.get(reason) ?? 0) + 1);
-        if (errors.length < 5) errors.push(`${batch[j].email}: ${reason}`);
-      }
-    }
-  }
-
-  const topError = [...errorCounts.entries()].sort((a, b) => b[1] - a[1])[0];
-  return {
-    sent,
-    failed,
-    errors,
-    errorSummary: topError ? `${topError[1]}× ${topError[0]}` : undefined,
-  };
 }
 
 /**
@@ -108,8 +65,12 @@ export async function POST(req: NextRequest) {
       if (user.suspended) throw new HttpError(400, "user_suspended", "Cannot email a suspended user.");
 
       const result = await sendAdminMessage({
-        to: user.email,
-        name: user.display_name ?? user.name ?? undefined,
+        recipient: {
+          email: user.email,
+          name: user.name,
+          display_name: user.display_name,
+          handle: user.handle,
+        },
         subject,
         body,
       });
@@ -151,7 +112,16 @@ export async function POST(req: NextRequest) {
       return Response.json({ ok: true, sent: 0, failed: 0, total: 0, message: "No recipients matched." });
     }
 
-    const { sent, failed, errors, errorSummary } = await sendBatch(recipients, subject, body);
+    const { sent, failed, errors, errorSummary } = await sendAdminBroadcast(
+      recipients.map((r) => ({
+        email: r.email,
+        name: r.name,
+        display_name: r.display_name,
+        handle: r.handle,
+      })),
+      subject,
+      body
+    );
 
     await recordAdminEvent({
       eventType: "ADMIN_EMAIL",
@@ -217,8 +187,12 @@ export async function PUT(req: NextRequest) {
     );
 
     const result = await sendAdminMessage({
-      to: admin.email,
-      name: admin.display_name ?? admin.name ?? undefined,
+      recipient: {
+        email: admin.email,
+        name: admin.name,
+        display_name: admin.display_name,
+        handle: admin.handle,
+      },
       subject: `[Test] ${subject}`,
       body,
     });

@@ -113,8 +113,12 @@ export async function POST(req: NextRequest) {
         });
         if (creator?.email && payout.tx_hash) {
           void sendPayoutNotification({
-            creatorName: creator.display_name ?? creator.name ?? "Creator",
-            creatorEmail: creator.email,
+            creator: {
+              email: creator.email,
+              name: creator.name,
+              display_name: creator.display_name,
+              handle: creator.handle,
+            },
             amount: formatUsdc(payout.amount),
             txHash: payout.tx_hash,
             walletAddress: payout.wallet_address,

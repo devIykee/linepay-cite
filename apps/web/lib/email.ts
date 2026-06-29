@@ -5,6 +5,7 @@
  * Required env: RESEND_API_KEY, RESEND_FROM_EMAIL.
  * Links use NEXT_PUBLIC_APP_URL.
  */
+import { marked } from "marked";
 import { Resend } from "resend";
 
 const ACCENT = "#FF9B73";
@@ -54,10 +55,57 @@ function appUrl(): string {
   return (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 }
 
-function firstName(name: string): string {
-  const trimmed = name.trim();
+export interface EmailRecipient {
+  email: string;
+  name?: string | null;
+  display_name?: string | null;
+  handle?: string | null;
+}
+
+function capitalizeWord(word: string): string {
+  if (!word) return word;
+  return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+}
+
+function firstNameFromFullName(fullName: string): string {
+  const trimmed = fullName.trim();
   if (!trimmed) return "there";
-  return trimmed.split(/\s+/)[0] ?? trimmed;
+  return capitalizeWord(trimmed.split(/\s+/)[0] ?? trimmed);
+}
+
+/** True when a string looks like a handle/username, not a person's name. */
+function looksLikeHandle(value: string, handle?: string | null): boolean {
+  const v = value.trim().toLowerCase();
+  if (!v) return true;
+  if (handle && v === handle.trim().toLowerCase()) return true;
+  // ada_writes_x7k2 — slug + random suffix from signup
+  if (/^[a-z0-9]+(_[a-z0-9]+){1,}$/.test(v)) return true;
+  if (v.includes("_") && !v.includes(" ")) return true;
+  return false;
+}
+
+function firstNameFromEmail(email: string): string | null {
+  const local = email.split("@")[0]?.split("+")[0]?.trim() ?? "";
+  if (!local) return null;
+  const segment = local.split(/[._-]/).find((p) => p.length >= 2);
+  if (!segment || /^\d+$/.test(segment)) return null;
+  return capitalizeWord(segment);
+}
+
+/**
+ * Best-effort first name for email greetings.
+ * Prefers OAuth `name` (e.g. "Eniola Omojolowo" → Eniola), skips handle-like display names.
+ */
+export function emailGreetingName(user: EmailRecipient): string {
+  if (user.name?.trim() && !looksLikeHandle(user.name, user.handle)) {
+    return firstNameFromFullName(user.name);
+  }
+  if (user.display_name?.trim() && !looksLikeHandle(user.display_name, user.handle)) {
+    return firstNameFromFullName(user.display_name);
+  }
+  const fromEmail = firstNameFromEmail(user.email);
+  if (fromEmail) return fromEmail;
+  return "there";
 }
 
 function truncateAddr(addr: string): string {
@@ -118,24 +166,102 @@ function safeHref(url: string): string | null {
   }
 }
 
-function bodyToHtml(body: string): string {
-  // Markdown links: [link text](https://example.com)
-  let html = escapeHtml(body).replace(
-    /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g,
-    (_match, label: string, url: string) => {
-      const href = safeHref(url);
-      if (!href) return _match;
-      return `<a href="${href}" style="color:${ACCENT};text-decoration:underline;">${label}</a>`;
-    }
-  );
-  // Bare URLs become clickable when not already part of a markdown link.
-  html = html.replace(/(^|[\s>])(https?:\/\/[^\s<]+)/g, (match, prefix: string, url: string) => {
-    const href = safeHref(url.replace(/[.,;:!?)]+$/, ""));
-    if (!href) return match;
-    const trailing = url.slice(href.length);
-    return `${prefix}<a href="${href}" style="color:${ACCENT};text-decoration:underline;">${href}</a>${escapeHtml(trailing)}`;
+function sanitizeRenderedHtml(html: string): string {
+  return html
+    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    .replace(/<style[\s\S]*?<\/style>/gi, "")
+    .replace(/\s+on\w+="[^"]*"/gi, "")
+    .replace(/javascript:/gi, "");
+}
+
+let markdownReady = false;
+
+/** Configure marked once — dark-theme inline styles for email clients. */
+function ensureMarkdownParser(): void {
+  if (markdownReady) return;
+  const linkStyle = `color:${ACCENT};text-decoration:underline;`;
+  const textStyle = `color:${TEXT};`;
+  const mutedStyle = `color:${MUTED};`;
+
+  marked.use({
+    gfm: true,
+    breaks: true,
+    renderer: {
+      html({ text }) {
+        return escapeHtml(text);
+      },
+      heading({ tokens, depth }) {
+        const inner = this.parser.parseInline(tokens);
+        const sizes: Record<number, string> = {
+          1: "22px",
+          2: "18px",
+          3: "16px",
+          4: "15px",
+          5: "14px",
+          6: "14px",
+        };
+        const size = sizes[depth] ?? "16px";
+        const margin = depth <= 2 ? "24px 0 12px" : "18px 0 8px";
+        return `<h${depth} style="margin:${margin};font-size:${size};font-weight:600;line-height:1.3;${textStyle}">${inner}</h${depth}>`;
+      },
+      paragraph({ tokens }) {
+        const inner = this.parser.parseInline(tokens);
+        return `<p style="margin:0 0 16px;line-height:1.7;${textStyle}">${inner}</p>`;
+      },
+      strong({ tokens }) {
+        return `<strong style="font-weight:600;${textStyle}">${this.parser.parseInline(tokens)}</strong>`;
+      },
+      em({ tokens }) {
+        return `<em style="font-style:italic;${textStyle}">${this.parser.parseInline(tokens)}</em>`;
+      },
+      del({ tokens }) {
+        return `<del style="${mutedStyle}">${this.parser.parseInline(tokens)}</del>`;
+      },
+      link({ href, tokens }) {
+        const inner = this.parser.parseInline(tokens);
+        const safe = safeHref(href ?? "");
+        if (!safe) return inner;
+        return `<a href="${safe}" style="${linkStyle}">${inner}</a>`;
+      },
+      codespan({ text }) {
+        return `<code style="font-family:ui-monospace,monospace;font-size:0.9em;background:#27272a;padding:2px 6px;border-radius:4px;${textStyle}">${escapeHtml(text)}</code>`;
+      },
+      code({ text, lang }) {
+        void lang;
+        return `<pre style="margin:0 0 16px;padding:16px;background:#18181b;border-radius:8px;overflow-x:auto;font-family:ui-monospace,monospace;font-size:13px;line-height:1.5;${textStyle}"><code>${escapeHtml(text)}</code></pre>`;
+      },
+      blockquote({ tokens }) {
+        const inner = this.parser.parse(tokens);
+        return `<blockquote style="margin:0 0 16px;padding:12px 16px;border-left:3px solid ${ACCENT};${mutedStyle}">${inner}</blockquote>`;
+      },
+      hr() {
+        return `<hr style="border:none;border-top:1px solid #27272a;margin:24px 0;"/>`;
+      },
+      list(token) {
+        const tag = token.ordered ? "ol" : "ul";
+        const inner = token.items.map((item) => this.listitem(item)).join("");
+        const spacing = token.ordered ? "padding-left:24px;" : "padding-left:20px;";
+        return `<${tag} style="margin:0 0 16px;${spacing}line-height:1.7;${textStyle}">${inner}</${tag}>`;
+      },
+      listitem(item) {
+        const inner = this.parser.parse(item.tokens);
+        return `<li style="margin:0 0 8px;">${inner}</li>`;
+      },
+      image({ href, title, text }) {
+        const safe = safeHref(href ?? "");
+        if (!safe) return escapeHtml(text);
+        const titleAttr = title ? ` title="${escapeHtml(title)}"` : "";
+        return `<p style="margin:0 0 16px;"><img src="${safe}" alt="${escapeHtml(text)}"${titleAttr} style="max-width:100%;border-radius:8px;"/></p>`;
+      },
+    },
   });
-  return html.replace(/\n/g, "<br/>");
+  markdownReady = true;
+}
+
+function markdownBodyToHtml(body: string): string {
+  ensureMarkdownParser();
+  const raw = marked.parse(body.trim()) as string;
+  return sanitizeRenderedHtml(raw);
 }
 
 /** Wraps Resend send — logs success/failure, never throws. */
@@ -170,8 +296,8 @@ export async function sendEmail(opts: SendOpts): Promise<SendEmailResult> {
   }
 }
 
-export async function sendWelcomeEmail(user: { name: string; email: string }): Promise<void> {
-  const name = firstName(user.name);
+export async function sendWelcomeEmail(recipient: EmailRecipient): Promise<void> {
+  const name = emailGreetingName(recipient);
   const dashboardUrl = `${appUrl()}/dashboard`;
   const html = emailShell(`
     <h1 style="margin:0 0 8px;font-size:24px;font-weight:600;line-height:1.3;">Welcome to Skimflow, ${name} 👋</h1>
@@ -187,17 +313,16 @@ export async function sendWelcomeEmail(user: { name: string; email: string }): P
     ${footer("You're receiving this because you signed up for Skimflow.")}
   `);
   const text = `Welcome to Skimflow, ${name}!\n\nSkimflow lets you earn USDC every time someone reads a block of your content.\n\nGo to your dashboard: ${dashboardUrl}\n\nYou're receiving this because you signed up for Skimflow.`;
-  await sendEmail({ to: user.email, subject: `Welcome to Skimflow, ${name} 👋`, html, text });
+  await sendEmail({ to: recipient.email, subject: `Welcome to Skimflow, ${name} 👋`, html, text });
 }
 
 export async function sendPayoutNotification(data: {
-  creatorName: string;
-  creatorEmail: string;
+  creator: EmailRecipient;
   amount: string;
   txHash: string;
   walletAddress: string;
 }): Promise<void> {
-  const name = firstName(data.creatorName);
+  const name = emailGreetingName(data.creator);
   const dashboardUrl = `${appUrl()}/dashboard`;
   const txShort = truncateAddr(data.txHash);
   const walletShort = truncateAddr(data.walletAddress);
@@ -227,31 +352,121 @@ export async function sendPayoutNotification(data: {
   const text = `Your payout is on its way, ${name}.\n\nAmount: ${data.amount} USDC\nTransaction: ${explorerUrl}\nWallet: ${data.walletAddress}\n\nSettled on Arc Testnet in USDC via Circle.\n\nView your earnings: ${dashboardUrl}\n\nYou're receiving this because you're a creator on Skimflow.`;
 
   await sendEmail({
-    to: data.creatorEmail,
+    to: data.creator.email,
     subject: `You received ${data.amount} USDC 💰`,
     html,
     text,
   });
 }
 
+function buildAdminMessagePayload(args: {
+  recipient: EmailRecipient;
+  subject: string;
+  body: string;
+}): SendOpts {
+  const greeting = emailGreetingName(args.recipient);
+  const html = emailShell(`
+    <p style="margin:0 0 16px;color:${MUTED};font-size:14px;">Hello ${escapeHtml(greeting)},</p>
+    <h1 style="margin:0 0 16px;font-size:22px;font-weight:600;line-height:1.3;">${escapeHtml(args.subject)}</h1>
+    <div style="font-size:16px;line-height:1.7;color:${TEXT};">${markdownBodyToHtml(args.body)}</div>
+    ${footer("You're receiving this from Skimflow.")}
+  `);
+  return {
+    to: args.recipient.email,
+    subject: args.subject,
+    html,
+    text: `Hello ${greeting},\n\n${args.subject}\n\n${args.body}\n\nYou're receiving this from Skimflow.`,
+  };
+}
+
 /** Custom message from admin — same dark template as transactional emails. */
 export async function sendAdminMessage(args: {
-  to: string;
-  name?: string;
+  recipient: EmailRecipient;
   subject: string;
   body: string;
 }): Promise<SendEmailResult> {
-  const greeting = firstName(args.name ?? "there");
-  const html = emailShell(`
-    <p style="margin:0 0 16px;color:${MUTED};font-size:14px;">Hi ${escapeHtml(greeting)},</p>
-    <h1 style="margin:0 0 16px;font-size:22px;font-weight:600;line-height:1.3;">${escapeHtml(args.subject)}</h1>
-    <div style="font-size:16px;line-height:1.7;color:${TEXT};">${bodyToHtml(args.body)}</div>
-    ${footer("You're receiving this from Skimflow.")}
-  `);
-  return sendEmail({
-    to: args.to,
-    subject: args.subject,
-    html,
-    text: `Hi ${greeting},\n\n${args.subject}\n\n${args.body}\n\nYou're receiving this from Skimflow.`,
-  });
+  return sendEmail(buildAdminMessagePayload(args));
+}
+
+export interface BroadcastResult {
+  sent: number;
+  failed: number;
+  errors: string[];
+  errorSummary?: string;
+}
+
+const RESEND_BATCH_MAX = 100;
+const RATE_LIMIT_PAUSE_MS = 1_100;
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+/**
+ * Broadcast admin messages via Resend's batch API (1 HTTP request per ≤100 recipients).
+ * Avoids the 10-requests/second limit that parallel single sends hit.
+ */
+export async function sendAdminBroadcast(
+  recipients: EmailRecipient[],
+  subject: string,
+  body: string
+): Promise<BroadcastResult> {
+  const from = formatFrom();
+  const key = getApiKey();
+  if (!key || !from) {
+    warnMissingProvider();
+    const missing = emailProviderStatus().missing.join(", ") || "RESEND_API_KEY, RESEND_FROM_EMAIL";
+    const msg = `Email not configured (missing: ${missing})`;
+    return { sent: 0, failed: recipients.length, errors: [msg], errorSummary: msg };
+  }
+
+  let sent = 0;
+  let failed = 0;
+  const errors: string[] = [];
+  const errorCounts = new Map<string, number>();
+  const client = resend ?? new Resend(key);
+
+  for (let i = 0; i < recipients.length; i += RESEND_BATCH_MAX) {
+    const chunk = recipients.slice(i, i + RESEND_BATCH_MAX);
+    const payloads = chunk.map((r) => {
+      const msg = buildAdminMessagePayload({ recipient: r, subject, body });
+      return { from, to: msg.to, subject: msg.subject, html: msg.html, text: msg.text };
+    });
+
+    let attempt = 0;
+    let done = false;
+    while (!done && attempt < 2) {
+      attempt++;
+      const { data, error } = await client.batch.send(payloads);
+      if (!error && data) {
+        sent += data.length;
+        done = true;
+        continue;
+      }
+      const reason = error?.message ?? "batch_send_failed";
+      const isRateLimit = /too many requests/i.test(reason);
+      if (isRateLimit && attempt < 2) {
+        await sleep(RATE_LIMIT_PAUSE_MS);
+        continue;
+      }
+      failed += chunk.length;
+      errorCounts.set(reason, (errorCounts.get(reason) ?? 0) + chunk.length);
+      if (errors.length < 5) {
+        for (const r of chunk.slice(0, 5 - errors.length)) {
+          errors.push(`${r.email}: ${reason}`);
+        }
+      }
+      done = true;
+    }
+
+    if (i + RESEND_BATCH_MAX < recipients.length) await sleep(RATE_LIMIT_PAUSE_MS);
+  }
+
+  const topError = [...errorCounts.entries()].sort((a, b) => b[1] - a[1])[0];
+  return {
+    sent,
+    failed,
+    errors,
+    errorSummary: topError ? `${topError[1]}× ${topError[0]}` : undefined,
+  };
 }
