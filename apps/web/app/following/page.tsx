@@ -357,20 +357,10 @@ function PostCard({ p, pending = false, unseen = false }: { p: FeedPost; pending
       <div className="mt-1 flex items-center justify-between gap-2 border-t border-outline-variant/60 pt-3">
         <div className="flex items-center gap-4">
           <span className="pill">{TYPE_LABEL[p.contentType] ?? p.contentType}</span>
-          {!pending && ((p.likeCount ?? 0) > 0 || (p.commentCount ?? 0) > 0) && (
-            <span className="flex items-center gap-3 text-outline">
-              {(p.likeCount ?? 0) > 0 && (
-                <span className="inline-flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[16px]">favorite</span>
-                  <span className="font-body-sm text-[12px]">{p.likeCount}</span>
-                </span>
-              )}
-              {(p.commentCount ?? 0) > 0 && (
-                <span className="inline-flex items-center gap-1">
-                  <span className="material-symbols-outlined text-[16px]">chat_bubble</span>
-                  <span className="font-body-sm text-[12px]">{p.commentCount}</span>
-                </span>
-              )}
+          {!pending && (p.likeCount ?? 0) > 0 && (
+            <span className="inline-flex items-center gap-1 text-outline">
+              <span className="material-symbols-outlined text-[16px]">favorite</span>
+              <span className="font-body-sm text-[12px]">{p.likeCount}</span>
             </span>
           )}
         </div>

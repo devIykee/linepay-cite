@@ -392,21 +392,11 @@ export default function ForYouPage() {
               )}
             </Link>
 
-            {/* Engagement counts (social proof only — actions live in the reader). */}
-            {!c.id.startsWith("temp-") && ((c.likeCount ?? 0) > 0 || (c.commentCount ?? 0) > 0) && (
-              <div className="mb-1 flex items-center gap-3 text-outline">
-                {(c.likeCount ?? 0) > 0 && (
-                  <span className="inline-flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[16px]">favorite</span>
-                    <span className="font-body-sm text-[12px]">{c.likeCount}</span>
-                  </span>
-                )}
-                {(c.commentCount ?? 0) > 0 && (
-                  <span className="inline-flex items-center gap-1">
-                    <span className="material-symbols-outlined text-[16px]">chat_bubble</span>
-                    <span className="font-body-sm text-[12px]">{c.commentCount}</span>
-                  </span>
-                )}
+            {/* Like count only (social proof — actions live in the reader). */}
+            {!c.id.startsWith("temp-") && (c.likeCount ?? 0) > 0 && (
+              <div className="mb-1 inline-flex items-center gap-1 text-outline">
+                <span className="material-symbols-outlined text-[16px]">favorite</span>
+                <span className="font-body-sm text-[12px]">{c.likeCount}</span>
               </div>
             )}
 
