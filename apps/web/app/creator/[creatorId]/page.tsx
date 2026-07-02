@@ -18,7 +18,7 @@ const feedHref = (id: string) => `/api/creators/${id}/feed.xml`;
 export async function generateMetadata({ params }: { params: Promise<{ creatorId: string }> }): Promise<Metadata> {
   const { creatorId } = await params;
   const creator = await resolveCreator(creatorId).catch(() => null);
-  if (!creator || creator.role === "admin" || creator.suspended) {
+  if (!creator || creator.suspended) {
     return { title: "Creator not found", robots: { index: false, follow: false } };
   }
   const name = publicName(creator);
@@ -38,7 +38,7 @@ export async function generateMetadata({ params }: { params: Promise<{ creatorId
 export default async function CreatorProfilePage({ params }: { params: Promise<{ creatorId: string }> }) {
   const { creatorId } = await params;
   const creator = await resolveCreator(creatorId).catch(() => null);
-  if (!creator || creator.role === "admin" || creator.suspended) notFound();
+  if (!creator || creator.suspended) notFound();
 
   const [rows, postCount, followerCount, followingCount] = await Promise.all([
     listPublishedByCreator(creator.id, { limit: FEED_LIMIT }),
